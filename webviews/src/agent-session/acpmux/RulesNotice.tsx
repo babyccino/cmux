@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useT } from "./i18n";
 
 /// One current rule of this Mac's acpmux forum (`_acpmux/forum/rules`, hq#2570): the newest
@@ -28,7 +28,10 @@ export function forumRules(reply: unknown): ForumRule[] {
           ? { kind: "agent" as const, sessionId: String(author.sessionId ?? ""), name: author.name }
           : undefined;
     if (!who) return [];
-    const acks = Array.isArray(r.acks) ? (r.acks as ForumRule["acks"]) : [];
+    const acks = (Array.isArray(r.acks) ? r.acks : []).flatMap((ack): ForumRule["acks"] => {
+      const a = ack as Record<string, unknown> | null;
+      return a && typeof a.sessionId === "string" ? [{ sessionId: a.sessionId, at: Number(a.at ?? 0) }] : [];
+    });
     return [{ id: r.id, key: r.key, body: r.body, author: who, created: Number(r.created ?? 0), acks }];
   });
 }
@@ -39,6 +42,7 @@ export function forumRules(reply: unknown): ForumRule[] {
 export function RulesNotice({ rules }: { rules: ForumRule[] }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const listId = useId();
   if (rules.length === 0) return null;
   const newest = rules.reduce((a, b) => (b.created > a.created ? b : a));
   const from = (rule: ForumRule) =>
@@ -51,12 +55,14 @@ export function RulesNotice({ rules }: { rules: ForumRule[] }) {
         <p className="acpmux-rules-head">
           <span className="acpmux-rules-title">{t("rules.title")}</span>
           <span className="acpmux-rules-count">{rules.length}</span>
-          <button type="button" data-notice-action="rules" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <button type="button" data-notice-action="rules" aria-expanded={open}
+            aria-controls={listId}
+            onClick={() => setOpen(!open)}>
             {open ? t("rules.hide") : t("rules.showAll")}
           </button>
         </p>
         {open ? (
-          <ul className="acpmux-rules-list">
+          <ul className="acpmux-rules-list" id={listId}>
             {rules.map((rule) => (
               <li key={rule.id} data-rule-key={rule.key}>
                 <p className="acpmux-host-error-message">

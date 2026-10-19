@@ -84,7 +84,8 @@ test("one line with the newest rule, then every rule with its author and acks", 
   expect(rows).toHaveLength(2);
   expect(rows[0]).toContain("Builds run on the fleet.");
   expect(rows[0]).toContain("leo");
-  expect(rows[0]).toContain("1");
+  expect(rows[0]).toContain("Acks: 1");
+  expect(rows[1]).toContain("Acks: 0");
   expect(rows[1]).toContain("ops");
   expect(button.getAttribute("aria-expanded")).toBe("true");
 });

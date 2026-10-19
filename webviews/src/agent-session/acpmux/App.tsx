@@ -2689,9 +2689,11 @@ function AcpmuxPane() {
   // rules it has not read yet. A chat on another machine or in the cloud gets none.
   const [rules, setRules] = useState<ForumRule[]>([]);
   const turnWorking = snapshot.isWorking;
+  // Only once the chat's summary says where it runs: a remote chat never shows this Mac's rules.
+  const rulesLocal = snapshot.summary !== undefined && healthLocal;
   useEffect(() => {
     const client = directClient.current;
-    if (!connected || !client || !healthLocal) {
+    if (!connected || !client || !rulesLocal) {
       setRules([]);
       return;
     }
@@ -2699,11 +2701,12 @@ function AcpmuxPane() {
     void Promise.resolve()
       .then(() => client.forumRules())
       .then((reply) => live && setRules(forumRules(reply)))
-      .catch(() => undefined);
+      // An older acpmux without the forum, or a failed read: no rules rather than stale ones.
+      .catch(() => live && setRules([]));
     return () => {
       live = false;
     };
-  }, [connected, healthLocal, snapshot.sessionId, turnWorking]);
+  }, [connected, rulesLocal, snapshot.sessionId, turnWorking]);
   const signIn = useMemo<SignIn>(
     () => ({
       signedOut,
@@ -5221,7 +5224,7 @@ function AcpmuxPane() {
           onUpdated={recheckHealth}
         />
       )}
-      {snapshot.sessionId && <RulesNotice rules={rules} />}
+      {snapshot.sessionId && rulesLocal && <RulesNotice rules={rules} />}
       {folderNeeded && !snapshot.sessionId && (
         <MissingFolder
           reason={folderNeeded.reason}
