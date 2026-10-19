@@ -137,7 +137,7 @@ async fn local_sessions_get_the_browser_and_cua_tools_and_skills() {
         .collect();
     assert_eq!(
         names,
-        ["cmux-cua", "cmux-secrets", "cmux-sessions", "cmux-subsessions", "cmux"],
+        ["cmux-cua", "cmux-secrets", "cmux-sessions", "cmux-subsessions", "cmux-forum", "cmux"],
         "{servers}"
     );
     assert_eq!(servers[0]["command"], json!(cua), "{servers}");
@@ -155,9 +155,16 @@ async fn local_sessions_get_the_browser_and_cua_tools_and_skills() {
         assert!(sub_env.contains(key), "{key}: {servers}");
     }
     assert!(sub_env.contains(&id), "{servers}");
-    assert_eq!(servers[4]["args"], json!(["mcp", "serve"]), "{servers}");
+    // The forum tools (`forum_mcp.rs`) act as this session the same way.
+    assert_eq!(servers[4]["args"], json!(["forum-mcp"]), "{servers}");
+    let forum_env = servers[4]["env"].to_string();
+    for key in ["ACPMUX_SESSION_ID", "ACPMUX_SESSION_TOKEN", "ACPMUX_SESSION_TOKEN_SOCKET"] {
+        assert!(forum_env.contains(key), "{key}: {servers}");
+    }
+    assert!(forum_env.contains(&id), "{servers}");
+    assert_eq!(servers[5]["args"], json!(["mcp", "serve"]), "{servers}");
     // No allowlist: the cmux server speaks code mode.
-    assert!(!servers[4]["env"].to_string().contains("CMUX_MCP_TOOLS"), "{servers}");
+    assert!(!servers[5]["env"].to_string().contains("CMUX_MCP_TOOLS"), "{servers}");
 
     // A client cannot set the list on its session: only a preset (the
     // Chief's turns, `chief_builtin_presets.rs`) does.
