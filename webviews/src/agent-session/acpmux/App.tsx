@@ -204,6 +204,7 @@ import { SteerMark } from "./conversation/SteerMark";
 import { Thinking } from "./conversation/Thinking";
 import { type WorkingCounts, WorkingCountsContext, WorkingFor } from "./conversation/WorkingFor";
 import { type HarnessHealth, HarnessHealthNotice } from "./HarnessHealthNotice";
+import { type ForumRule, forumRules, RulesNotice } from "./RulesNotice";
 import { type SignIn, SignInContext, signedOutHarnesses, useSignIn } from "./signIn";
 import { HostError } from "./HostError";
 import { SHELL_ROW, ShellRuns, shellContextAttachments, withShellRows } from "./shell/shellRuns";
@@ -2683,6 +2684,26 @@ function AcpmuxPane() {
       live = false;
     };
   }, [connected, healthLocal, healthRecheck, catalogSource]);
+  // The forum's current rules on this Mac (hq#2570), pinned above the composer: read when the pane
+  // connects or opens a chat, and at each turn's start and end, when the chat's agent is told the
+  // rules it has not read yet. A chat on another machine or in the cloud gets none.
+  const [rules, setRules] = useState<ForumRule[]>([]);
+  const turnWorking = snapshot.isWorking;
+  useEffect(() => {
+    const client = directClient.current;
+    if (!connected || !client || !healthLocal) {
+      setRules([]);
+      return;
+    }
+    let live = true;
+    void Promise.resolve()
+      .then(() => client.forumRules())
+      .then((reply) => live && setRules(forumRules(reply)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [connected, healthLocal, snapshot.sessionId, turnWorking]);
   const signIn = useMemo<SignIn>(
     () => ({
       signedOut,
@@ -5200,6 +5221,7 @@ function AcpmuxPane() {
           onUpdated={recheckHealth}
         />
       )}
+      {snapshot.sessionId && <RulesNotice rules={rules} />}
       {folderNeeded && !snapshot.sessionId && (
         <MissingFolder
           reason={folderNeeded.reason}
