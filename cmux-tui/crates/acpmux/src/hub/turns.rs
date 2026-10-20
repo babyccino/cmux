@@ -370,6 +370,7 @@ impl Hub {
             let e = RpcError::new(-32000, "the remote floor cancelled this turn before its prompt")
                 .with_data(json!({"reason": reason}));
             self.refuse_started_turn(session, &prompt_id, &turn_id, &e);
+            self.forum_turn_end(session, &told, false);
             drop(guard);
             return Err(e);
         }
@@ -453,9 +454,7 @@ impl Hub {
         let mut result =
             self.finish_turn(session, &child, result, &prompt_id, &turn_id, turn_seq).await;
         // A rule counts as told once the agent answered the prompt that carried it.
-        if result.is_ok() {
-            self.forum_told(session, &told);
-        }
+        self.forum_turn_end(session, &told, result.is_ok());
         // A connection error cut the turn off: it goes on by itself (`auto_resume.rs`).
         let cut = match (&result, detached) {
             (Err(e), false) => Some(super::auto_resume::CutTurn {
@@ -686,7 +685,7 @@ impl Hub {
     /// Waits until the inbound loop handled every agent message queued before
     /// now. Bounded: a loop that is gone (closed channel) or stuck never holds
     /// a turn's settlement past the bound.
-    async fn drain_inbound(session: &Session) {
+    pub(super) async fn drain_inbound(session: &Session) {
         let (done, handled) = tokio::sync::oneshot::channel();
         let queued = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -696,6 +695,39 @@ impl Hub {
         if matches!(queued, Ok(Ok(()))) {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handled).await;
         }
+    }
+
+    /// A bare "agent process closed" from a process that died while it
+    /// started (`initialize`, `session/new`): the same error with the last
+    /// stderr line that says why, once the inbound loop has taken what the
+    /// process printed. Any other error is returned as is.
+    pub(super) async fn explain_start_failure(session: &Session, mut e: RpcError) -> RpcError {
+        if e.message != "agent process closed" {
+            return e;
+        }
+        let last = || {
+            session
+                .stderr_tail
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .map(|l| l.trim().to_owned())
+                .find(|l| explains_exit(l))
+        };
+        Self::drain_inbound(session).await;
+        let mut found = last();
+        if found.is_none() {
+            // The stderr reader can trail stdout's close by a moment: one
+            // bounded wait for its last lines, then the bare error.
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            Self::drain_inbound(session).await;
+            found = last();
+        }
+        if let Some(line) = found {
+            e.message = format!("agent process closed ({}): {line}", session.meta().harness);
+        }
+        e
     }
 
     /// Keep the outcome of the last turn on the session (`lastTurn` in the
