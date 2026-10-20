@@ -5,6 +5,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { JSDOM } from "jsdom";
+import { readFileSync } from "node:fs";
 import { forumRules, RulesNotice } from "./RulesNotice";
 
 let dom: JSDOM | undefined;
@@ -55,6 +56,8 @@ const reply = {
     { id: "a", key: "builds", body: "Builds run on the fleet.", author: { kind: "person", account: "leo" }, created: 1, acks: [{ sessionId: "s1", at: 2 }] },
     { id: "b", key: "ci", body: "Wait with glaeda-gh.", author: { kind: "agent", sessionId: "s2", name: "ops" }, created: 5, acks: [] },
     { id: "c", key: "bad", author: { kind: "person", account: "x" } },
+    null,
+    "row",
   ],
 };
 
@@ -88,4 +91,11 @@ test("one line with the newest rule, then every rule with its author and acks", 
   expect(rows[1]).toContain("Acks: 0");
   expect(rows[1]).toContain("ops");
   expect(button.getAttribute("aria-expanded")).toBe("true");
+});
+
+test("the open list scrolls inside a bounded height, so long rules never push the composer out", () => {
+  const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+  const rule = css.match(/\.acpmux-rules-list\{([^}]*)\}/)?.[1] ?? "";
+  expect(rule).toMatch(/max-height:/);
+  expect(rule).toMatch(/overflow-y:auto/);
 });
