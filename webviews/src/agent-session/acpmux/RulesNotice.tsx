@@ -18,9 +18,10 @@ export function forumRules(reply: unknown): ForumRule[] {
   const rows = (reply as { rules?: unknown } | null)?.rules;
   if (!Array.isArray(rows)) return [];
   return rows.flatMap((row): ForumRule[] => {
+    if (!row || typeof row !== "object") return [];
     const r = row as Record<string, unknown>;
-    const author = r.author as Record<string, unknown> | undefined;
-    if (typeof r.id !== "string" || typeof r.key !== "string" || typeof r.body !== "string" || !author) return [];
+    const author = r.author as Record<string, unknown> | null | undefined;
+    if (typeof r.id !== "string" || typeof r.key !== "string" || typeof r.body !== "string" || !author || typeof author !== "object") return [];
     const who =
       author.kind === "person" && typeof author.account === "string"
         ? { kind: "person" as const, account: author.account }
