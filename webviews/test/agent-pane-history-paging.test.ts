@@ -139,6 +139,7 @@ await requireBrowserLane("agent-pane-history-paging.test.ts", async () => {
   let vite: Awaited<ReturnType<typeof createServer>> | undefined;
   let browser: Browser | undefined;
   beforeAll(async () => {
+    const setup0 = Date.now();
     daemon = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
@@ -167,6 +168,7 @@ await requireBrowserLane("agent-pane-history-paging.test.ts", async () => {
     await vite.listen();
     await warmViteServer(vite, "/");
     browser = await chromium.launch({ headless: true });
+    console.log(`TIMING setup=${Date.now() - setup0}ms`);
   });
   afterAll(async () => {
     await browser?.close();
@@ -182,6 +184,7 @@ await requireBrowserLane("agent-pane-history-paging.test.ts", async () => {
     const endpoint = `ws://127.0.0.1:${daemon!.port}/`;
     await page.goto(`http://127.0.0.1:${port}/#endpoint=${encodeURIComponent(endpoint)}&token=t&session=${CHAT}`);
     await page.getByText(`Question ${TURNS}`, { exact: true }).waitFor({ timeout: 60_000 });
+    console.log(`TIMING opened`);
     await page.waitForTimeout(500);
 
     // Opening fetched the tail only, and capped its size: acpmux ends a page at maxBytes, the most a
@@ -223,7 +226,9 @@ await requireBrowserLane("agent-pane-history-paging.test.ts", async () => {
     // repeat or reorder none.
     const seen: string[] = [];
     const workedLabels = new Set<string>();
+    const t0 = Date.now(); let settleMs = 0, steps = 0;
     for (let step = 0; step < 800 && !reachedFirst; step++) {
+      steps++;
       const before = await page.evaluate(() => {
         const node = document.querySelector<HTMLElement>(".acpmux-scroll")!;
         const view = node.getBoundingClientRect();
@@ -239,8 +244,16 @@ await requireBrowserLane("agent-pane-history-paging.test.ts", async () => {
       });
       for (const text of [...before.shown].reverse()) if (seen.at(-1) !== text && !seen.includes(text)) seen.push(text);
       for (const label of before.worked) workedLabels.add(label);
-      await page.mouse.wheel(0, -300);
-      await settle();
+      if (step === 5 || step === 40 || step === 41 || step === 120) {
+        const wheelAt = await page.evaluate(() => { const w = window as any; w.__tr = []; const sc = document.querySelector<HTMLElement>(".acpmux-scroll")!; const t0 = performance.now(); const tick = (now: number) => { w.__tr.push(`${Math.round(now - t0)}:${Math.round(sc.scrollTop)}/${sc.scrollHeight}`); if (now - t0 < 1500) requestAnimationFrame(tick); }; requestAnimationFrame(tick); return 0; });
+        void wheelAt;
+        await page.mouse.wheel(0, -300);
+        await page.waitForTimeout(1600);
+        const tr = await page.evaluate(() => (window as any).__tr as string[]);
+        const changes = tr.filter((e, i) => i === 0 || e.split(":")[1] !== tr[i - 1].split(":")[1]);
+        console.log(`TRACE step ${step} frames=${tr.length} inflight=${inflight} changes: ${changes.join(" ")}`);
+      } else await page.mouse.wheel(0, -300);
+      const s0 = Date.now(); await settle(); settleMs += Date.now() - s0;
       const after = await page.evaluate((text) => {
         const node = document.querySelector<HTMLElement>(".acpmux-scroll")!;
         const view = node.getBoundingClientRect();
@@ -266,6 +279,7 @@ await requireBrowserLane("agent-pane-history-paging.test.ts", async () => {
       if (moved < -1 || moved > 301)
         jumps.push(`${before.mark.text}: moved ${moved.toFixed(1)}px at scrollTop ${before.top} -> ${after.top}`);
     }
+    console.log(`TIMING steps=${steps} loop=${Date.now()-t0}ms settle=${settleMs}ms`);
     await page.waitForTimeout(500);
 
     const older = requests.filter(
