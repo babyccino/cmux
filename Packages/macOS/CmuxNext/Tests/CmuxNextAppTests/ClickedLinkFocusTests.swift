@@ -231,5 +231,6 @@ struct ClickedLinkFocusTests {
         }
         return "focused pane \(String(describing: focused?.layoutPaneID)) selects \(String(describing: focused?.stripModel.selectedID?.rawValue)), wanted \(tab); "
             + panes.sorted().joined(separator: "; ")
+            + "; generation \(content.focus.state.generation), recent focus events: " + content.focus.recent.suffix(16).joined(separator: " | ")
     }
 }
