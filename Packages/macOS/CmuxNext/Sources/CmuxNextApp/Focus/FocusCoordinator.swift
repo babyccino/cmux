@@ -98,6 +98,7 @@ final class FocusCoordinator {
                 }
                 let effects = result.effects
                 record(event)
+                recent[recent.count - 1] += " [\(previous.pane?.suffix(4) ?? "-")>\(reduced.pane?.suffix(4) ?? "-") g\(reduced.generation) x\(reduced.expectation != nil) fx\(effects.count)]"
                 if omnibarMemory.note(event, before: previous.resolved, after: reduced.resolved) {
                     // Runs after this event's effects moved the responder to the page.
                     queue.append(.focusTarget(.addressBar, source: .programmatic))
@@ -207,7 +208,7 @@ final class FocusCoordinator {
 
     private static func describe(_ event: FocusEvent) -> String {
         switch event {
-        case .topology(let topology): "topology(\(topology.workspace ?? "-"), \(topology.panes.count) panes)"
+        case .topology(let topology): "topology(" + topology.panes.map { "\($0.id.suffix(4)):\($0.tabs.map { $0.id.suffix(4) }.joined(separator: ","))" }.joined(separator: " ") + ")"
         default: String(describing: event)
         }
     }
