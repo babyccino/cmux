@@ -52,6 +52,8 @@ final class TopHomePageView: NSView {
         split.frame = bounds
         split.autoresizingMask = [.width, .height]
         addSubview(split)
+        // A drop on the conversation list attaches to the shown conversation (TopHomePageView+Drop).
+        registerForDraggedTypes(HomeNativeTranscriptView.attachmentDragTypes)
         wireList(services)
         observe(services.home)
         // task-owner: lives as long as this view; one read of the team and Chiefs

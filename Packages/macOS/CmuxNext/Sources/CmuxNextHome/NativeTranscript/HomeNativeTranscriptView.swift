@@ -37,6 +37,12 @@ public final class HomeNativeTranscriptView: NSView {
     /// The chain of attachment preparations, in the order they arrived.
     // task-owner: replaced by the next intake; awaited by attachmentsReady
     var intake: Task<Void, Never>?
+    /// Drops whose promised files are still on their way (the notice says so meanwhile).
+    var pendingDrops = 0
+    /// The pane's drop highlight (HomeDropHighlightView), over everything, never hit.
+    let dropHighlight = HomeDropHighlightView(frame: .zero)
+    /// Whether the current drag (its sequence number) is one the composer takes: read once per drag.
+    var dropAnswer: (sequence: Int, accepts: Bool)?
     /// What a drag's pasteboard holds, as the intake reads it (the pasteboard itself; a value in
     /// tests: a ci-step mini has no pasteboard server).
     var dropContents: (NSPasteboard) -> any HomePasteboardContents = { $0 }
@@ -136,6 +142,7 @@ public final class HomeNativeTranscriptView: NSView {
         noticeLabel.maximumNumberOfLines = 2
         noticeLabel.isSelectable = false
         addSubview(noticeLabel)
+        addSubview(dropHighlight)
         connectAttachments()
         firstRun.isHidden = true
         firstRun.onAction = { [weak self] action in self?.onFirstRunAction(action) }
@@ -330,6 +337,8 @@ public final class HomeNativeTranscriptView: NSView {
         let top = transcript.headerHeight
         let panel = CGRect(x: 0, y: top, width: bounds.width, height: max(0, transcript.fieldTop - top))
         if firstRun.frame != panel { firstRun.frame = panel }
+        let outline = bounds.insetBy(dx: HomeDropHighlightView.inset, dy: HomeDropHighlightView.inset)
+        if dropHighlight.frame != outline { dropHighlight.frame = outline }
         layoutNotice()
     }
 
@@ -429,6 +438,7 @@ public final class HomeNativeTranscriptView: NSView {
                                  danger: Palette.danger, done: Palette.highlight)
             noticeLabel.textColor = Palette.textSecondary
         }
+        dropHighlight.applyTheme()
     }
 }
 

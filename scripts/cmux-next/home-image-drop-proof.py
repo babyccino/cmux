@@ -142,7 +142,27 @@ def element_point(w, name):
     if not best:
         return None, {"elements": len(body.get("elements") or []), "scale": scale}
     f = best[1]
-    return (bounds["x"] + (f["x"] + f["w"] / 2) / scale, bounds["y"] + (f["y"] + f["h"] / 2) / scale), {"role": best[2], "frame": f, "scale": scale}
+    # Element frames are screen points (top-left origin), not screenshot pixels: a Finder icon at
+    # window-local pixels/2 landed in the sidebar (the first run on 2026-10-20 dragged nothing).
+    return (f["x"] + f["w"] / 2, f["y"] + f["h"] / 2), {"role": best[2], "frame": f, "scale": scale, "bounds": bounds}
+
+
+def close_window(w):
+    """Clicks `w`'s own close button through accessibility (never a key to whatever app is in front)."""
+    if not w:
+        return False
+    state = cua("get_window_state", {"pid": w["pid"], "window_id": w["window_id"], "include_screenshot": False, "max_depth": 4})
+    body = find_elements(state) or {}
+    for e in body.get("elements") or []:
+        label = ((e.get("label") or "") + " " + (e.get("role") or "") + " " + str(e.get("subrole") or "")).lower()
+        if "close" in label and "button" in label and e.get("element_token"):
+            r = cua("click", {"pid": w["pid"], "window_id": w["window_id"], "element_token": e["element_token"]})
+            return "error" not in r
+    return False
+
+
+def front(pid):
+    cua("bring_to_front", {"pid": pid})
 
 
 # --- CoreGraphics input (the SSH session has the Accessibility grant) ---
@@ -163,8 +183,14 @@ cg.CFRelease.argtypes = [ctypes.c_void_p]
 CMD, SHIFT = 0x100000, 0x20000
 
 
+cg.CGEventSetIntegerValueField.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int64]
+CLICK_STATE = 1  # kCGMouseEventClickState
+
+
 def mouse(kind, x, y):
     e = cg.CGEventCreateMouseEvent(None, kind, P(x, y), 0)
+    if kind in (1, 2, 6):  # down, up, dragged: a single click's press
+        cg.CGEventSetIntegerValueField(e, CLICK_STATE, 1)
     cg.CGEventPost(0, e)
     cg.CFRelease(e)
 
@@ -256,13 +282,22 @@ def serve():
 
 # --- the app ---
 HOME_WID = []
+APP_PID = [None]
 
 
 def home_window():
-    mine = [x for x in windows() if "cmux DEV" in (x.get("app_name") or "") and x.get("is_on_screen")]
+    """The tagged app's Home window: the one recorded at setup, else the app's largest on-screen window."""
+    listed = windows()
+    mine = [x for x in listed if x.get("pid") == APP_PID[0] or "cmux DEV" in (x.get("app_name") or "")]
     if HOME_WID:
-        return next((x for x in mine if x.get("window_id") == HOME_WID[0]), None)
-    return mine[0] if mine else None
+        found = next((x for x in mine if x.get("window_id") == HOME_WID[0]), None)
+        if found:
+            return found
+    shown = [x for x in mine if x.get("is_on_screen") and (x.get("bounds") or {}).get("width", 0) > 300]
+    if not shown:
+        R.setdefault("home-window-misses", []).append([{k: x.get(k) for k in ("app_name", "pid", "window_id", "is_on_screen", "bounds", "title")}
+                                                       for x in listed][:12])
+    return max(shown, key=lambda x: x["bounds"]["width"] * x["bounds"]["height"]) if shown else None
 
 
 def home_point(where="transcript"):
@@ -284,7 +319,7 @@ def rows():
     return [(x.get("kind"), x.get("key"), x.get("outgoing")) for x in r.get("rows") or []]
 
 
-def run_case(name, start, src_point, where="transcript", cleanup=None):
+def run_case(name, source_pid, src_point, where="transcript", cleanup=None, refront=True):
     case = {"where": where}
     R["cases"][name] = case
     try:
@@ -293,14 +328,23 @@ def run_case(name, start, src_point, where="transcript", cleanup=None):
             case["error"] = "not located: source %s, Home %s" % (src_point, dst)
             return
         case["src"], case["dst"] = src_point, dst
+        # Home's window above every other app's window, then the source's window (on the left half) above it.
+        hw = home_window()
+        if hw and refront:
+            front(hw["pid"])
+        if source_pid:
+            front(source_pid)
         before_rows = rows()
         shot = os.path.join(opts.out, f"{name}-hover.png")
         t0 = time.time()
         held = drag(src_point, dst, during=lambda: {"draft": draft(), "snapshot": rpc("debug.window_snapshot", {"kind": "main", "path": shot}, 20)})
         case["hover"] = held
         case["drop_s"] = round(time.time() - t0, 2)
-        # The draft after the drop: ready attachments (newer builds), else the send below says it.
-        settled = until(lambda: (d := draft()) and isinstance(d, dict) and d.get("ok") and not d.get("pending") and d, 15)
+        # The draft after the drop: its attachments once prepared (newer builds; an older build answers
+        # no draft, so this waits out the 15 s and the send below says what attached).
+        want = 5 if name.startswith("finder-multi") else 1
+        settled = until(lambda: (d := draft()) and isinstance(d, dict) and d.get("ok") and not d.get("pending")
+                        and len(d.get("attachments") or []) >= want and d, 15)
         case["draft"] = settled or draft()
         rpc("debug.window_snapshot", {"kind": "main", "path": os.path.join(opts.out, f"{name}-after.png")}, 20)
         sent = rpc("debug.home.drive", {"action": "send"})
@@ -321,42 +365,66 @@ def run_case(name, start, src_point, where="transcript", cleanup=None):
         save()
 
 
+def finder_window(folder):
+    """The Finder window of the job's folder `folder`, framed on the left half (waits for the frame:
+    an icon located before the resize lands moves with the relayout)."""
+    for stale in [x for x in windows() if (x.get("app_name") or "") == "Finder" and (x.get("title") or "").startswith("finder-")]:
+        close_window(stale)  # the job's own earlier folders (their windows can cover the next icon)
+    subprocess.run(["open", "-a", "Finder", os.path.join(SRC, folder)])
+    w = until(lambda: window("Finder", folder), 10)
+    if not w:
+        return None
+    frame(w)
+
+    def framed():
+        x = window("Finder", folder)
+        b = (x or {}).get("bounds") or {}
+        return x if x and abs(b.get("x", -99) - SOURCE_FRAME["x"]) < 3 and abs(b.get("width", 0) - SOURCE_FRAME["width"]) < 3 else None
+    return until(framed, 5) or window("Finder", folder) or w
+
+
 def finder_case(ext):
     d = os.path.join(SRC, f"finder-{ext}")
     if not os.path.isdir(d):
         R["cases"][f"finder-{ext}"] = {"error": "no source file"}; return
-    subprocess.run(["open", "-a", "Finder", d])
-    w = until(lambda: window("Finder", f"finder-{ext}"), 10)
+    w = finder_window(f"finder-{ext}")
     if not w:
         R["cases"][f"finder-{ext}"] = {"error": "no Finder window"}; return
-    frame(w)
-    w = until(lambda: window("Finder", f"finder-{ext}"), 5) or w
     name = "hidp-pic.png" if ext == "multi" else f"hidp-pic.{ext}"
     point, how = until(lambda: (r := element_point(w, name)) and r[0] and r, 10) or (None, None)
     R["setup"][f"finder-{ext}-locate"] = how
     if point and ext == "multi":
+        front(w["pid"])
         click(*point)
-        key(0, CMD)  # Cmd+A: every file in the folder
+        if window("Finder", f"finder-{ext}"):
+            key(0, CMD)  # Cmd+A: every file in the folder (Finder is in front: the click went there)
     def cleanup():
-        fw = window("Finder", f"finder-{ext}")
-        if fw:
-            cua("bring_to_front", {"pid": fw["pid"]})
-            key(13, CMD)
-    run_case(f"finder-{ext}", None, point, cleanup=cleanup)
+        close_window(window("Finder", f"finder-{ext}"))
+    run_case(f"finder-{ext}", w["pid"], point, cleanup=cleanup)
 
 
 def screenshot_case():
     desktop = os.path.join(HOME, "Desktop")
     before = set(glob.glob(os.path.join(desktop, "Screenshot*")))
+    hw = home_window()
+    if hw:
+        front(hw["pid"])  # before the shortcut: the thumbnail lives about 5 s
     key(20, CMD | SHIFT)  # Cmd+Shift+3: the whole screen, with the floating thumbnail
-    w = until(lambda: next((x for x in windows() if "screencaptureui" in (x.get("app_name") or "").lower()
-                            or (x.get("app_name") or "") in ("Screenshot", "Screen Capture UI")), None), 8, 0.1)
-    R["setup"]["screenshot-window"] = w
+    # The floating thumbnail is a panel above layer 0 (list_windows does not list it): it sits at the
+    # bottom right of the main screen, about 20 pt in, about 200 x 130 pt, for about 5 s. Wait for the file
+    # (written when the thumbnail shows), then drag from the thumbnail's middle at once.
+    until(lambda: set(glob.glob(os.path.join(desktop, "Screenshot*"))) - before, 8, 0.1)
+    size = cua("get_screen_size", {})
+    width = size.get("width") or (size.get("structuredContent") or {}).get("width") or 1512
+    height = size.get("height") or (size.get("structuredContent") or {}).get("height") or 982
+    point = (width - 20 - 100, height - 20 - 65)
+    R["setup"]["screenshot-point"] = {"screen": [width, height], "point": point,
+                                      "file": sorted(set(glob.glob(os.path.join(desktop, "Screenshot*"))) - before)}
 
     def cleanup():
         for path in set(glob.glob(os.path.join(desktop, "Screenshot*"))) - before:
             os.remove(path)
-    run_case("screenshot", None, center(w) if w else None, cleanup=cleanup)
+    run_case("screenshot", None, point, cleanup=cleanup, refront=False)
 
 
 def chrome_case(url):
@@ -369,12 +437,10 @@ def chrome_case(url):
         w = window("Chrome", "hidp page") or w
 
     def cleanup():
-        cw = window("Chrome", "hidp page")
-        if cw:
-            cua("bring_to_front", {"pid": cw["pid"]})
-            key(12, CMD)  # Cmd+Q: the instance on the job's own profile
+        # The job's own profile instance quits itself (chrome://quit); no other Chrome is touched.
+        subprocess.run(["open", "-na", "Google Chrome", "--args", f"--user-data-dir={profile}", "chrome://quit"])
     x, y = center(w) if w else (None, None)
-    run_case("chrome", None, (x, y + 50) if w else None, cleanup=cleanup)
+    run_case("chrome", w["pid"] if w else None, (x, y + 50) if w else None, cleanup=cleanup)
 
 
 def safari_case(url):
@@ -388,15 +454,14 @@ def safari_case(url):
 
     def cleanup():
         sw = window("Safari", "hidp page")
-        if sw:
-            cua("bring_to_front", {"pid": sw["pid"]})
-            key(13, CMD)  # Cmd+W: the job's tab
-            back = window("Safari")
-            if back and original:
-                frame(back, {"x": original["x"], "y": original["y"], "width": original["width"], "height": original["height"]})
+        if sw and not old:
+            close_window(sw)  # the job opened this window
+        elif sw and original:
+            # The tab opened in an existing window: it stays (its window's other tabs are not the job's).
+            frame(sw, {"x": original["x"], "y": original["y"], "width": original["width"], "height": original["height"]})
     x, y = center(w) if w else (None, None)
     R["setup"]["safari-had-window"] = bool(old)
-    run_case("safari", None, (x, y + 50) if w else None, cleanup=cleanup)
+    run_case("safari", w["pid"] if w else None, (x, y + 50) if w else None, cleanup=cleanup)
 
 
 def preview_case():
@@ -411,12 +476,9 @@ def preview_case():
         key(0, CMD)  # Select All: the drag carries the selection's picture
 
     def cleanup():
-        pw = window("Preview", "preview-src")
-        if pw:
-            cua("bring_to_front", {"pid": pw["pid"]})
-            key(13, CMD)
+        close_window(window("Preview", "preview-src"))
     x, y = center(w) if w else (None, None)
-    run_case("preview", None, (x, y + 20) if w else None, cleanup=cleanup)
+    run_case("preview", w["pid"] if w else None, (x, y + 20) if w else None, cleanup=cleanup)
 
 
 def cmux_browser_case(url):
@@ -425,7 +487,11 @@ def cmux_browser_case(url):
     import uuid
     tries["newWindow"] = rpc("action.run", {"action": "newWindow", "args": {}, "wait": True, "focus": True, "origin": "script",
                                             "idempotency_key": f"mutation_{uuid.uuid4().hex}"}, 60)
-    tries["open"] = rpc("browser.open_split", {"url": url, "focus": True, "idempotency_key": f"mutation_{uuid.uuid4().hex}"}, 40)
+    created = ((tries["newWindow"] or {}).get("created") or [None])[0] if isinstance(tries["newWindow"], dict) else None
+    params = {"url": url, "focus": True, "idempotency_key": f"mutation_{uuid.uuid4().hex}"}
+    if created:
+        params["workspace_id"] = created  # the new window's workspace, not the Home window's
+    tries["open"] = rpc("browser.open_split", params, 40)
     R["setup"]["cmux-browser"] = tries
     w = until(lambda: next((x for x in windows() if ("cmux DEV" in (x.get("app_name") or "")) and "hidp page" in (x.get("title") or "")), None), 15)
     if not w:
@@ -437,7 +503,7 @@ def cmux_browser_case(url):
         frame(w)
         w = next((x for x in windows() if x.get("window_id") == w["window_id"]), w)
     x, y = center(w) if w else (None, None)
-    run_case("cmux-browser", None, (x, y + 60) if w else None)
+    run_case("cmux-browser", None, (x, y + 60) if w else None, cleanup=lambda: close_window(w) if w else None)
 
 
 cases = [c for c in opts.only.split(",") if c] or ["finder-png", "finder-jpg", "finder-heic", "finder-gif", "finder-pdf", "finder-multi",
@@ -453,6 +519,7 @@ env = {"HOME": HOME, "USER": os.environ.get("USER", ""), "TMPDIR": os.environ.ge
        "CMUX_DEV_BACKEND_MODE": "local", "CMUX_NEXT_CLASSIC_HOME": "1", "ACPMUX_AGENT_LAUNCH": "deny", "NX_REMOTE": "1"}
 proc = subprocess.Popen([os.path.join(APP, "Contents/MacOS/cmux DEV")], env=env, cwd=opts.out, stdin=subprocess.DEVNULL,
                         stdout=open(os.path.join(opts.out, "app.log"), "a"), stderr=subprocess.STDOUT, start_new_session=True)
+APP_PID[0] = proc.pid
 code = 1
 try:
     up = until(lambda: isinstance(r := rpc("debug.home"), dict) and "classic" in r and r, 120)
@@ -470,18 +537,12 @@ try:
             ext, _, where = case[len("finder-"):].partition("@")
             if where:
                 # the same file, dropped on the message box itself
-                d = os.path.join(SRC, f"finder-{ext}")
-                subprocess.run(["open", "-a", "Finder", d])
-                w = until(lambda: window("Finder", f"finder-{ext}"), 10)
-                if w:
-                    frame(w); w = window("Finder", f"finder-{ext}") or w
+                w = finder_window(f"finder-{ext}")
                 point = (element_point(w, f"hidp-pic.{ext}")[0] if w else None)
 
                 def cleanup(ext=ext):
-                    fw = window("Finder", f"finder-{ext}")
-                    if fw:
-                        cua("bring_to_front", {"pid": fw["pid"]}); key(13, CMD)
-                run_case(case, None, point, where=where, cleanup=cleanup)
+                    close_window(window("Finder", f"finder-{ext}"))
+                run_case(case, w["pid"] if w else None, point, where=where, cleanup=cleanup)
             else:
                 finder_case(ext)
         elif case == "screenshot":
