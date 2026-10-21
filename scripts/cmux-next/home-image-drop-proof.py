@@ -288,7 +288,8 @@ APP_PID = [None]
 def home_window():
     """The tagged app's Home window: the one recorded at setup, else the app's largest on-screen window."""
     listed = windows()
-    mine = [x for x in listed if x.get("pid") == APP_PID[0] or "cmux DEV" in (x.get("app_name") or "")]
+    # Only this job's app: another lane's tagged app can stay on screen (a401-webviews-v5 on 2026-10-21).
+    mine = [x for x in listed if x.get("pid") == APP_PID[0] or (x.get("app_name") or "") == f"cmux DEV {TAG}"]
     if HOME_WID:
         found = next((x for x in mine if x.get("window_id") == HOME_WID[0]), None)
         if found:
@@ -493,10 +494,11 @@ def cmux_browser_case(url):
         params["workspace_id"] = created  # the new window's workspace, not the Home window's
     tries["open"] = rpc("browser.open_split", params, 40)
     R["setup"]["cmux-browser"] = tries
-    w = until(lambda: next((x for x in windows() if ("cmux DEV" in (x.get("app_name") or "")) and "hidp page" in (x.get("title") or "")), None), 15)
+    ours = lambda x: x.get("pid") == APP_PID[0] or (x.get("app_name") or "") == f"cmux DEV {TAG}"
+    w = until(lambda: next((x for x in windows() if ours(x) and "hidp page" in (x.get("title") or "")), None), 15)
     if not w:
         # The browser window's title is the workspace's: the newest app window that is not the Home window.
-        mine = [x for x in windows() if "cmux DEV" in (x.get("app_name") or "") and x.get("is_on_screen")
+        mine = [x for x in windows() if ours(x) and x.get("is_on_screen") and (x.get("bounds") or {}).get("width", 0) > 300
                 and x.get("window_id") not in HOME_WID]
         w = mine[0] if mine else None
     if w:
