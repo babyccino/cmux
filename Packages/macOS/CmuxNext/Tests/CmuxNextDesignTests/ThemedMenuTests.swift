@@ -98,6 +98,28 @@ import Testing
         #expect(seen == 1, "the outcome step saw \(String(describing: seen)) runs of the chosen row")
     }
 
+    /// Return, keypad Enter and Space on the highlighted row run it, as on a native menu (a real
+    /// menu on cmux-macmini, 2026-10-21: Return and Enter did nothing on any themed row). A menu's
+    /// window sends a key to its first responder and keeps it for itself when it has none, and the
+    /// menu runs no action for a row drawn by a view. So the key goes the way a tracking menu sends it
+    /// here: the menu's delegate hears the highlight, then the row's window gets the key.
+    @Test(arguments: [(UInt16(36), "\r"), (UInt16(76), "\u{3}"), (UInt16(49), " ")])
+    func anActivationKeyThroughTheMenusWindowRunsTheHighlightedRow(_ keyCode: UInt16, _ characters: String) throws {
+        let counter = Counter()
+        let menu = Self.menu(counter)
+        menu.themeRows(in: try Self.accentedScope())
+        let row = try #require(menu.items[0].view as? ThemedMenuRowView)
+        let window = Self.menuWindow(holding: row)
+        row.highlightOverride = true
+        // The pointer or an arrow key highlighted the first row.
+        menu.delegate?.menu?(menu, willHighlight: menu.items[0])
+
+        window.sendEvent(try Self.key(keyCode, characters, in: window))
+        Self.drainRunLoop { counter.count > 0 }
+        #expect(counter.count == 1, "key \(keyCode) on the highlighted row ran it \(counter.count) times; first responder \(String(describing: window.firstResponder))")
+        #expect(counter.sender === menu.items[0])
+    }
+
     /// Return on a highlighted submenu row is AppKit's (it opens the submenu): the row passes it on.
     @Test func returnOnASubmenuRowIsNotSwallowed() throws {
         let counter = Counter()
@@ -188,6 +210,21 @@ import Testing
         while !done(), Date() < deadline {
             RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02))
         }
+    }
+
+    /// A window that holds `row` as a menu's window holds its rows (never shown).
+    private static func menuWindow(holding row: NSView) -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 60), styleMask: [.borderless], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(row)
+        return window
+    }
+
+    private static func key(_ keyCode: UInt16, _ characters: String, in window: NSWindow) throws -> NSEvent {
+        let flags: NSEvent.ModifierFlags = keyCode == 76 ? [.numericPad] : []
+        return try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber,
+                                             context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
+                                             keyCode: keyCode))
     }
 
     private static func returnKey() throws -> NSEvent {
