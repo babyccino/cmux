@@ -282,13 +282,22 @@ def serve():
 
 # --- the app ---
 HOME_WID = []
+APP_PID = [None]
 
 
 def home_window():
-    mine = [x for x in windows() if "cmux DEV" in (x.get("app_name") or "") and x.get("is_on_screen")]
+    """The tagged app's Home window: the one recorded at setup, else the app's largest on-screen window."""
+    listed = windows()
+    mine = [x for x in listed if x.get("pid") == APP_PID[0] or "cmux DEV" in (x.get("app_name") or "")]
     if HOME_WID:
-        return next((x for x in mine if x.get("window_id") == HOME_WID[0]), None)
-    return mine[0] if mine else None
+        found = next((x for x in mine if x.get("window_id") == HOME_WID[0]), None)
+        if found:
+            return found
+    shown = [x for x in mine if x.get("is_on_screen") and (x.get("bounds") or {}).get("width", 0) > 300]
+    if not shown:
+        R.setdefault("home-window-misses", []).append([{k: x.get(k) for k in ("app_name", "pid", "window_id", "is_on_screen", "bounds", "title")}
+                                                       for x in listed][:12])
+    return max(shown, key=lambda x: x["bounds"]["width"] * x["bounds"]["height"]) if shown else None
 
 
 def home_point(where="transcript"):
@@ -460,7 +469,11 @@ def cmux_browser_case(url):
     import uuid
     tries["newWindow"] = rpc("action.run", {"action": "newWindow", "args": {}, "wait": True, "focus": True, "origin": "script",
                                             "idempotency_key": f"mutation_{uuid.uuid4().hex}"}, 60)
-    tries["open"] = rpc("browser.open_split", {"url": url, "focus": True, "idempotency_key": f"mutation_{uuid.uuid4().hex}"}, 40)
+    created = ((tries["newWindow"] or {}).get("created") or [None])[0] if isinstance(tries["newWindow"], dict) else None
+    params = {"url": url, "focus": True, "idempotency_key": f"mutation_{uuid.uuid4().hex}"}
+    if created:
+        params["workspace_id"] = created  # the new window's workspace, not the Home window's
+    tries["open"] = rpc("browser.open_split", params, 40)
     R["setup"]["cmux-browser"] = tries
     w = until(lambda: next((x for x in windows() if ("cmux DEV" in (x.get("app_name") or "")) and "hidp page" in (x.get("title") or "")), None), 15)
     if not w:
@@ -488,6 +501,7 @@ env = {"HOME": HOME, "USER": os.environ.get("USER", ""), "TMPDIR": os.environ.ge
        "CMUX_DEV_BACKEND_MODE": "local", "CMUX_NEXT_CLASSIC_HOME": "1", "ACPMUX_AGENT_LAUNCH": "deny", "NX_REMOTE": "1"}
 proc = subprocess.Popen([os.path.join(APP, "Contents/MacOS/cmux DEV")], env=env, cwd=opts.out, stdin=subprocess.DEVNULL,
                         stdout=open(os.path.join(opts.out, "app.log"), "a"), stderr=subprocess.STDOUT, start_new_session=True)
+APP_PID[0] = proc.pid
 code = 1
 try:
     up = until(lambda: isinstance(r := rpc("debug.home"), dict) and "classic" in r and r, 120)
