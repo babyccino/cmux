@@ -340,8 +340,11 @@ def run_case(name, source_pid, src_point, where="transcript", cleanup=None, refr
         held = drag(src_point, dst, during=lambda: {"draft": draft(), "snapshot": rpc("debug.window_snapshot", {"kind": "main", "path": shot}, 20)})
         case["hover"] = held
         case["drop_s"] = round(time.time() - t0, 2)
-        # The draft after the drop: ready attachments (newer builds), else the send below says it.
-        settled = until(lambda: (d := draft()) and isinstance(d, dict) and d.get("ok") and not d.get("pending") and d, 15)
+        # The draft after the drop: its attachments once prepared (newer builds; an older build answers
+        # no draft, so this waits out the 15 s and the send below says what attached).
+        want = 5 if name.startswith("finder-multi") else 1
+        settled = until(lambda: (d := draft()) and isinstance(d, dict) and d.get("ok") and not d.get("pending")
+                        and len(d.get("attachments") or []) >= want and d, 15)
         case["draft"] = settled or draft()
         rpc("debug.window_snapshot", {"kind": "main", "path": os.path.join(opts.out, f"{name}-after.png")}, 20)
         sent = rpc("debug.home.drive", {"action": "send"})
