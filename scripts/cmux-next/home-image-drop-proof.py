@@ -142,7 +142,9 @@ def element_point(w, name):
     if not best:
         return None, {"elements": len(body.get("elements") or []), "scale": scale}
     f = best[1]
-    return (bounds["x"] + (f["x"] + f["w"] / 2) / scale, bounds["y"] + (f["y"] + f["h"] / 2) / scale), {"role": best[2], "frame": f, "scale": scale}
+    # Element frames are screen points (top-left origin), not screenshot pixels: a Finder icon at
+    # window-local pixels/2 landed in the sidebar (the first run on 2026-10-20 dragged nothing).
+    return (f["x"] + f["w"] / 2, f["y"] + f["h"] / 2), {"role": best[2], "frame": f, "scale": scale, "bounds": bounds}
 
 
 def close_window(w):
@@ -308,7 +310,7 @@ def rows():
     return [(x.get("kind"), x.get("key"), x.get("outgoing")) for x in r.get("rows") or []]
 
 
-def run_case(name, source_pid, src_point, where="transcript", cleanup=None):
+def run_case(name, source_pid, src_point, where="transcript", cleanup=None, refront=True):
     case = {"where": where}
     R["cases"][name] = case
     try:
@@ -319,7 +321,7 @@ def run_case(name, source_pid, src_point, where="transcript", cleanup=None):
         case["src"], case["dst"] = src_point, dst
         # Home's window above every other app's window, then the source's window (on the left half) above it.
         hw = home_window()
-        if hw:
+        if hw and refront:
             front(hw["pid"])
         if source_pid:
             front(source_pid)
@@ -377,22 +379,25 @@ def finder_case(ext):
 def screenshot_case():
     desktop = os.path.join(HOME, "Desktop")
     before = set(glob.glob(os.path.join(desktop, "Screenshot*")))
+    hw = home_window()
+    if hw:
+        front(hw["pid"])  # before the shortcut: the thumbnail lives about 5 s
     key(20, CMD | SHIFT)  # Cmd+Shift+3: the whole screen, with the floating thumbnail
-    def thumbnail():
-        for x in windows():
-            b = x.get("bounds") or {}
-            app = (x.get("app_name") or "").lower()
-            if ("screencapture" in app or "screenshot" in app) and x.get("is_on_screen") and b.get("width", 0) > 40 and b.get("height", 0) > 40:
-                return x
-        return None
-    w = until(thumbnail, 8, 0.1)
-    R["setup"]["screenshot-window"] = w
-    R["setup"]["screenshot-candidates"] = [x for x in windows() if "screen" in (x.get("app_name") or "").lower()][:6]
+    # The floating thumbnail is a panel above layer 0 (list_windows does not list it): it sits at the
+    # bottom right of the main screen, about 20 pt in, about 200 x 130 pt, for about 5 s. Wait for the file
+    # (written when the thumbnail shows), then drag from the thumbnail's middle at once.
+    until(lambda: set(glob.glob(os.path.join(desktop, "Screenshot*"))) - before, 8, 0.1)
+    size = cua("get_screen_size", {})
+    width = size.get("width") or (size.get("structuredContent") or {}).get("width") or 1512
+    height = size.get("height") or (size.get("structuredContent") or {}).get("height") or 982
+    point = (width - 20 - 100, height - 20 - 65)
+    R["setup"]["screenshot-point"] = {"screen": [width, height], "point": point,
+                                      "file": sorted(set(glob.glob(os.path.join(desktop, "Screenshot*"))) - before)}
 
     def cleanup():
         for path in set(glob.glob(os.path.join(desktop, "Screenshot*"))) - before:
             os.remove(path)
-    run_case("screenshot", None, center(w) if w else None, cleanup=cleanup)
+    run_case("screenshot", None, point, cleanup=cleanup, refront=False)
 
 
 def chrome_case(url):
