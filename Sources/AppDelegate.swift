@@ -10863,7 +10863,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // recursively traversed while a restored Bonsplit topology is mounted.
         // Suppress that walk only for the restore transaction; ordinary windows
         // retain AppKit's default key-view behavior.
-        if isRestoringSessionWindowSnapshot {
+        if isRestoringSessionWindowSnapshot || ProcessInfo.processInfo.environment["CMUX_TMP_NO_KEYLOOP"] == "1" {
             window.autorecalculatesKeyViewLoop = false
         }
         window.contentView = MainWindowHostingView(rootView: root)
@@ -10948,7 +10948,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             excludingStableIdentities: excludingStableIdentitiesFromSessionSnapshot,
             deferBrowserPanels: isRestoringSessionWindowSnapshot
         )
-        if isRestoringSessionWindowSnapshot {
+        if isRestoringSessionWindowSnapshot && ProcessInfo.processInfo.environment["CMUX_TMP_NO_KEYLOOP"] != "1" {
             window.autorecalculatesKeyViewLoop = true
             window.recalculateKeyViewLoop()
         }

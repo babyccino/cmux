@@ -1834,15 +1834,19 @@ final class WindowTerminalPortal: NSObject {
             clearPresentationNotificationState(for: hostedId)
             return
         }
+        let tmpKeepAttached = ProcessInfo.processInfo.environment["CMUX_TMP_KEEP_ATTACHED"] == "1"
         entry.visibleInUI = false
-        entry.hostedView?.clearPortalGeometry()
+        if !tmpKeepAttached {
+            entry.hostedView?.clearPortalGeometry()
+        }
         entry.needsSettledCommit = false
         entry.transientRecoveryRetriesRemaining = 0
         entry.provisionalGeometry = nil
         entriesByHostedId[hostedId] = entry
         clearPresentationNotificationState(for: hostedId)
+        if entry.hostedView?.isHidden == false { TmpSwitchProbe.log("portal.hide") }
         entry.hostedView?.isHidden = true
-        if let hostedView = entry.hostedView, hostedView.superview === hostView {
+        if !tmpKeepAttached, let hostedView = entry.hostedView, hostedView.superview === hostView {
             hostedView.removeFromSuperview()
         }
 #if DEBUG
@@ -2636,6 +2640,7 @@ final class WindowTerminalPortal: NSObject {
             )
 #endif
             hostedView.isHidden = false
+            TmpSwitchProbe.log("portal.reveal syncLayout=\(syncLayout ? 1 : 0)")
             // A reveal can happen without any frame delta (same targetFrame), which means the
             // normal frame-change refresh path won't run. Nudge geometry + redraw so newly
             // revealed terminals don't sit on a stale/blank IOSurface until later focus churn.
@@ -3181,6 +3186,10 @@ enum TerminalWindowPortalRegistry {
         portalsByWindowId[ObjectIdentifier(window)] = portal
         installWindowCloseObserverIfNeeded(for: window)
         return portal
+    }
+
+    static func tmpSynchronizeNow(for window: NSWindow) {
+        existingPortal(for: window)?.synchronizeAllEntriesFromExternalGeometryChange()
     }
 
     private static func existingPortal(for window: NSWindow) -> WindowTerminalPortal? {

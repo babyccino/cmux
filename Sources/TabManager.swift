@@ -4611,6 +4611,8 @@ class TabManager: ObservableObject {
               ) else {
             return
         }
+        TmpSwitchProbe.start = CACurrentMediaTime()
+        TmpSwitchProbe.log("cycle eventAge=\(NSApp.currentEvent.map { String(format: "%.1f", (ProcessInfo.processInfo.systemUptime - $0.timestamp) * 1000) } ?? "nil")ms")
 #if DEBUG
         let directionLabel = switch direction {
         case .next: "next"
@@ -7610,5 +7612,13 @@ enum CloseDontAskAgainCheckbox {
         let dismissibleKinds = kinds.subtracting(.safety)
         guard !dismissibleKinds.isEmpty, alert.suppressionButton?.state == .on else { return }
         CloseTabWarningStore(defaults: defaults).disableWarnings(dismissibleKinds)
+    }
+}
+
+enum TmpSwitchProbe {
+    static var start: CFTimeInterval = 0
+    @MainActor static func log(_ message: String) {
+        let dt = (CACurrentMediaTime() - start) * 1000
+        GhosttyApp.shared.logBackground("TMPSW \(message) dt=\(String(format: "%.1f", dt))ms")
     }
 }

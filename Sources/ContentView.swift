@@ -1830,6 +1830,9 @@ struct ContentView: View {
         }
         let mountedWorkspaceIdSet = Set(presentationMountedIds)
         let mountedWorkspaces = tabManager.tabs.filter { mountedWorkspaceIdSet.contains($0.id) }
+#if DEBUG
+        cmuxDebugLog("TMPPROBE terminalContent window=\(windowIdentifier) selected=\(debugShortWorkspaceId(selectedWorkspaceId)) state=\(debugShortWorkspaceIds(mountedWorkspaceIds)) presented=\(debugShortWorkspaceIds(presentationMountedIds)) home=\(sidebarSelectionState.selection == .home ? 1 : 0)")
+#endif
         // Chief Home covers the content area without unmounting workspaces:
         // terminals live in the window portal above SwiftUI, so the selected
         // workspace must also report itself hidden and input-inactive.
@@ -2743,6 +2746,7 @@ struct ContentView: View {
             // already advanced again. Reconcile the current model value once,
             // regardless of which intermediate value triggered this callback.
             let authoritativeSelection = tabManager.selectedTabId
+            TmpSwitchProbe.log("onChange")
 #if DEBUG
             if let snapshot = tabManager.debugCurrentWorkspaceSwitchSnapshot() {
                 let dtMs = (CACurrentMediaTime() - snapshot.startedAt) * 1000
@@ -2771,6 +2775,18 @@ struct ContentView: View {
                 )
             }
             reconcileMountedWorkspaceIds(selectedId: authoritativeSelection)
+            if ProcessInfo.processInfo.environment["CMUX_TMP_SYNC_REVEAL"] == "1",
+               let authoritativeSelection,
+               let window = observedWindow,
+               let incoming = tabManager.tabs.first(where: { $0.id == authoritativeSelection }) {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                CATransaction.setCompletionBlock { TmpSwitchProbe.log("syncReveal.commitDone") }
+                incoming.reconcileTerminalPortalVisibilityForCurrentRenderedLayout()
+                TerminalWindowPortalRegistry.tmpSynchronizeNow(for: window)
+                TmpSwitchProbe.log("syncReveal.done")
+                CATransaction.commit()
+            }
             AppDelegate.shared?.syncBonsplitTabShortcutHintEligibility(in: observedWindow)
             // Any workspace switch (shortcut, palette, socket, notification
             // open, new workspace) leaves Chief Home for the workspace.
@@ -3644,6 +3660,15 @@ struct ContentView: View {
         let pinnedIds = tabManager.mountedBackgroundWorkspaceLoadIds
             .union(tabManager.debugPinnedWorkspaceLoadIds)
         let selectedCount = selectedId == nil ? 0 : 1
+        if let raw = ProcessInfo.processInfo.environment["CMUX_TMP_MAX_MOUNTED"], let limit = Int(raw) {
+            return WorkspaceMountPlan(
+                current: mountedWorkspaceIds,
+                selected: selectedId,
+                pinnedIds: pinnedIds,
+                orderedTabIds: tabs.map { $0.id },
+                maxMounted: limit
+            ).mountedWorkspaceIds
+        }
         return WorkspaceMountPlan(
             current: mountedWorkspaceIds,
             selected: selectedId,
