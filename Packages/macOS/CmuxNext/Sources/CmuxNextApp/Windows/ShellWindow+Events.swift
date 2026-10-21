@@ -1,5 +1,6 @@
 import AppKit
 import CmuxNextDesign
+import CmuxNextFocus
 
 extension ShellWindow {
     /// The window's one titlebar decision (`TitlebarDragPolicy`): a left
@@ -46,7 +47,12 @@ extension ShellWindow {
             return
         }
         guard let controller = windowController as? WindowController else { return }
-        controller.focus.responderDidChange(FocusResponderClassifier.classify(firstResponder, in: controller), source: .current)
+        let classified = FocusResponderClassifier.classify(firstResponder, in: controller)
+        if FocusEvent.Source.current == .programmatic {
+            FileHandle.standardError.write(Data(("RESPONDER-REPORT \(classified) \(String(describing: firstResponder))\n"
+                + Thread.callStackSymbols.prefix(30).joined(separator: "\n") + "\nRESPONDER-END\n").utf8))
+        }
+        controller.focus.responderDidChange(classified, source: .current)
     }
 
     override func becomeKey() {
