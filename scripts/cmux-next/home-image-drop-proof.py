@@ -365,16 +365,31 @@ def run_case(name, source_pid, src_point, where="transcript", cleanup=None, refr
         save()
 
 
+def finder_window(folder):
+    """The Finder window of the job's folder `folder`, framed on the left half (waits for the frame:
+    an icon located before the resize lands moves with the relayout)."""
+    for stale in [x for x in windows() if (x.get("app_name") or "") == "Finder" and (x.get("title") or "").startswith("finder-")]:
+        close_window(stale)  # the job's own earlier folders (their windows can cover the next icon)
+    subprocess.run(["open", "-a", "Finder", os.path.join(SRC, folder)])
+    w = until(lambda: window("Finder", folder), 10)
+    if not w:
+        return None
+    frame(w)
+
+    def framed():
+        x = window("Finder", folder)
+        b = (x or {}).get("bounds") or {}
+        return x if x and abs(b.get("x", -99) - SOURCE_FRAME["x"]) < 3 and abs(b.get("width", 0) - SOURCE_FRAME["width"]) < 3 else None
+    return until(framed, 5) or window("Finder", folder) or w
+
+
 def finder_case(ext):
     d = os.path.join(SRC, f"finder-{ext}")
     if not os.path.isdir(d):
         R["cases"][f"finder-{ext}"] = {"error": "no source file"}; return
-    subprocess.run(["open", "-a", "Finder", d])
-    w = until(lambda: window("Finder", f"finder-{ext}"), 10)
+    w = finder_window(f"finder-{ext}")
     if not w:
         R["cases"][f"finder-{ext}"] = {"error": "no Finder window"}; return
-    frame(w)
-    w = until(lambda: window("Finder", f"finder-{ext}"), 5) or w
     name = "hidp-pic.png" if ext == "multi" else f"hidp-pic.{ext}"
     point, how = until(lambda: (r := element_point(w, name)) and r[0] and r, 10) or (None, None)
     R["setup"][f"finder-{ext}-locate"] = how
@@ -522,11 +537,7 @@ try:
             ext, _, where = case[len("finder-"):].partition("@")
             if where:
                 # the same file, dropped on the message box itself
-                d = os.path.join(SRC, f"finder-{ext}")
-                subprocess.run(["open", "-a", "Finder", d])
-                w = until(lambda: window("Finder", f"finder-{ext}"), 10)
-                if w:
-                    frame(w); w = window("Finder", f"finder-{ext}") or w
+                w = finder_window(f"finder-{ext}")
                 point = (element_point(w, f"hidp-pic.{ext}")[0] if w else None)
 
                 def cleanup(ext=ext):
