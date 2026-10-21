@@ -140,10 +140,10 @@ import UniformTypeIdentifiers
             if target.responds(to: #selector(NSDraggingDestination.draggingUpdated(_:))) {
                 for _ in 0..<5 { operation = target.draggingUpdated(drag) }
             }
-            let highlighted = operation.contains(.copy)  // the drop highlight lands with the fix
+            let highlighted = transcript.dropHighlight.isShowing
             // The message box's own text drop (NSTextView) reads private drag state this stand-in drag
             // does not have: the box drops here only when Home's intake took the drag (its highlight shows).
-            let intakeTook = !(target is NSTextView)  // the field reports its drags with the fix
+            let intakeTook = !(target is NSTextView) || transcript.dropHighlight.isShowing
             let dropped = operation.contains(.copy) && intakeTook && target.performDragOperation(drag)
             // NSTextView's own drag end reads private drag-session state this stand-in lacks.
             if target is NSTextView {
@@ -151,7 +151,7 @@ import UniformTypeIdentifiers
             } else if target.responds(to: #selector(NSDraggingDestination.draggingEnded(_:))) {
                 target.draggingEnded(drag)
             }
-            return (operation, highlighted, dropped, true)
+            return (operation, highlighted, dropped, !transcript.dropHighlight.isShowing)
         }
 
         /// The test process serves no local conversations, so Home would show why it can't (and may say
@@ -301,7 +301,7 @@ import UniformTypeIdentifiers
         let source = Promise(name: "Screenshot 2026-10-20 at 21.00.00.png", bytes: bytes)
         let rows = try #require(h.places.first { $0.0 == "transcript" }?.1)
         let (operation, highlighted, dropped, _) = h.drop(Board(promises: [source]), sequence: 900, over: rows)
-        let pendingShown = true  // the pending notice lands with the fix
+        let pendingShown = h.transcript.notice == HomeStrings.attachPending
         await h.transcript.attachmentsReady()
         #expect(operation == .copy && highlighted, "\(container): a file promise showed \(operation), highlight \(highlighted)")
         #expect(dropped)
@@ -309,6 +309,21 @@ import UniformTypeIdentifiers
         #expect(pendingShown, "\(container): no pending notice while the promised file came")
         #expect(h.drafted == [source.name], "\(container): the draft holds \(h.drafted)")
         #expect(h.transcript.notice == nil, "\(container): the notice stayed: \(h.transcript.notice ?? "")")
+    }
+
+    /// A browser's picture: a promise of its file the drag can't read before the drop, its bytes and its
+    /// link. The bytes alone make the drag a picture drop (the promise answered nothing).
+    @Test func aBrowserPictureWithAnUnreadablePromiseAttachesItsBytes() async throws {
+        let h = try await Self.harness(.homeTab)
+        defer { h.close() }
+        let data = try #require(Self.picture(.png))
+        let rows = try #require(h.places.first { $0.0 == "transcript" }?.1)
+        var board = Board(bytes: [.png: data], text: "https://example.com/cat.png", link: true)
+        board.promiseTypesOnly = true
+        let (operation, _, dropped, _) = h.drop(board, sequence: 902, over: rows)
+        await h.transcript.attachmentsReady()
+        #expect(operation == .copy && dropped, "a browser picture showed \(operation), dropped \(dropped)")
+        #expect(h.drafted.count == 1, "the draft holds \(h.drafted)")
     }
 
     /// Preview's selection and a browser's picture carry picture bytes (TIFF, PDF, GIF) with no file;

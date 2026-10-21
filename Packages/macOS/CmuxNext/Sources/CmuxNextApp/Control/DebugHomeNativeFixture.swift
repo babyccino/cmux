@@ -136,6 +136,15 @@ final class DebugHomeNativeFixture: InternalPageProvider {
             ok = true
         case "geometry":
             return .object(["ok": .bool(true), "geometry": .object(view.debugGeometry().mapValues { .number($0) })])
+        case "draft":
+            // The draft's attachments, the drops still on their way, the notice and the drop highlight
+            // (scripts/cmux-next/home-image-drop-proof.py reads it while a real drag holds over Home).
+            let state = view.debugDraftState
+            let attachments: [JSONValue] = state.attachments.map {
+                .object(["name": .string($0.name), "mime": .string($0.mimeType), "bytes": .number(Double($0.bytes))])
+            }
+            return .object(["ok": .bool(true), "attachments": .array(attachments), "pending": .number(Double(state.pending)),
+                            "notice": state.notice.map { .string($0) } ?? .null, "highlighted": .bool(state.highlighted)])
         case "texts":
             // What the transcript view itself holds (its MessagesLab store), oldest first, to compare
             // with the HomeStore transcript and the owner's snapshot (a message in both but not here is hidden); a stream (ask 11) last.
@@ -193,7 +202,7 @@ final class DebugHomeNativeFixture: InternalPageProvider {
         case "scroll": view.debugScroll(by: CGFloat(params["dy"]?.doubleValue ?? -400)); ok = true
         default:
             if let out = view.debugTreeDrive(params["action"]?.stringValue ?? "", params.compactMapValues(\.stringValue)) { return .object(out.mapValues { .string($0) }) }
-            return .object(["error": .string("action must be focus, type, send, stream, tapback, video, scroll, menu, geometry, link, texts, typing, nudge, thread, escape, reply, post_escape, thread_state, reply_text, branch or permalink")])
+            return .object(["error": .string("action must be focus, type, send, stream, tapback, video, scroll, menu, geometry, draft, link, texts, typing, nudge, thread, escape, reply, post_escape, thread_state, reply_text, branch or permalink")])
         }
         return .object(["ok": .bool(ok)])
     }
