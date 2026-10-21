@@ -10,7 +10,7 @@ for what a person must do: an OAuth sign-in, a secret, a macOS switch.
 | Task | Done today | Agent path today | JSON | Safe to re-run |
 | --- | --- | --- | --- | --- |
 | cmux sign-in, accounts | GUI (Settings > Accounts, sidebar) | `cmux accounts list` reads; `cmux cloud sign-in` opens the browser; reauth/connect are person-only | yes (list) | list yes; sign-in refuses when signed in |
-| Harness install and sign-in | GUI (Settings > Agents, Harnesses page) | `cmux harness list/doctor/login --json`; `cmux agent check-harness`; install is left to the user | yes | yes |
+| Harness install and sign-in | GUI (Settings > Agents, Harnesses page) | `cmux setup harness [ID ...]`; `cmux harness list/doctor/login --json`; install and sign-in are the user's | yes | yes |
 | Folder trust | GUI (TrustAsk line, sub-session card) | none: raw `acp.trust.set` over the acpmux socket | - | - |
 | Add an ssh machine | GUI (Connect to Machine...) | `cmux acp host setup SSH --json`; `cmux remote connect` | yes (acp) | yes |
 | acpmux peers, host updates | none in the app | `cmux acp host ls/update --json` | yes | yes |
@@ -62,14 +62,47 @@ The Chief loads the `cmux-setup` skill (shipped in optchat-chief's
 
 ## Tasks setup runs
 
-1. `trust [FOLDER] [--level trusted|untrusted|unknown]` (this change).
+1. `trust [FOLDER] [--level trusted|untrusted|unknown]`.
    It writes acpmux's own record (`acpmux::trust`), the answer the pane's
    Trust question and the trust gate read, through the running daemon when
    there is one so a sub-session waiting on the folder goes on at once.
    Claude Code's and Codex's files keep their one writer. The record already
    holding the level is `ok`; `undo` names the level it held before.
-2. `harness [ID]` (next): `harness doctor` and `login --status` for each
-   harness; a missing CLI or sign-in comes back as `needs_user` with the
-   login command.
+2. `harness [ID ...]`: for each named harness, else every configured or
+   discovered one, whether its CLI is installed (its command resolves),
+   signed in and outdated. It runs acpmux's health check
+   (`acpmux::harness_health`, the rows of `_acpmux/harness/health`) as a
+   library, so the answer is fresh and needs no daemon. A sign-in that
+   evidence (`auth.check`, the agent's login files) leaves unknown is asked
+   of an ACP harness itself, as `cmux harness login ID --status` does
+   (`initialize` and `session/new`); `cmux harness doctor` runs a prompt
+   turn and stays the deep check. Outdated compares the installed version
+   with the newest one the daemon last read (`harness-health.json`), so
+   setup asks no registry. A named id that is not configured is checked
+   with the profile acpmux ships for it (`configured: false`). The result
+   is
+
+   ```json
+   {"schema_version": 1, "task": "harness", "state": "needs_user", "dry_run": false,
+    "harnesses": [{"id": "gemini", "name": "gemini", "state": "needs_user",
+      "configured": true, "installed": true, "program": "/usr/local/bin/gemini",
+      "path": "/usr/local/bin/gemini", "version": "0.1.0", "signed_in": false,
+      "auth_detail": "session/new failed (-32000): ...", "outdated": false,
+      "latest": "0.1.0", "update": null, "problem": null,
+      "user_action": {"kind": "oauth", "command": "cmux harness login gemini", ...}}],
+    "undo": null, "user_action": {"kind": "oauth", ...}}
+   ```
+
+   A harness is `ok` when it is installed and nothing says it is signed
+   out (`signed_in` is `null` when cmux cannot see the sign-in, such as
+   Claude Code's keychain login; its first chat asks if it must). Signed
+   out is `needs_user` with kind `oauth` and `cmux harness login ID`; a
+   missing CLI is `needs_user` with kind `install` and the profile's docs
+   as `url`. The task state is `needs_user` when any harness is, and its
+   `user_action` is the first one. It writes nothing: install and sign-in
+   are the person's, and an update has no undo, so an outdated harness
+   names its `update` command instead of running it. UniiChat (the bundled
+   adapter, offered everywhere) counts only when named or configured; no
+   harness at all is `needs_user` to install one.
 3. `machine SSH_TARGET` (next): `acp host setup`, and `acp host enroll` once
    #22823 lands (install, daemon, harness, peers both ways, doctor).

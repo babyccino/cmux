@@ -56,7 +56,16 @@ one.
   agents run the folder's own hooks and configs without asking.
   `--level untrusted` records a refusal; `--level unknown` forgets the
   answer. It never edits Claude Code's or Codex's own files.
-- Harness install and sign-in: `cmux harness doctor ID --json` names the
-  failing step and its fix; `cmux harness login ID` starts the sign-in.
+- Harness install and sign-in: `cmux setup harness [ID ...]` (default:
+  every configured or found harness) says per harness whether it is
+  installed, signed in and outdated. A signed-out one is `needs_user` with
+  `cmux harness login ID`: run it in a terminal beside your chat and the
+  user finishes the sign-in in the browser. A missing CLI is `needs_user`
+  with the install docs as `url`. An outdated one names its `update`
+  command; run it only when the user wants the update. Run
+  `cmux setup harness ID` again after the user acts. `signed_in: null`
+  means cmux cannot see the sign-in; it is still `ok`.
+  `cmux harness doctor ID --json` runs a real prompt turn when a harness
+  that looks ready still fails.
 - Add an ssh machine: `cmux acp host setup SSH_TARGET --json`, then
   `cmux acp host ls --json` to see it connected.

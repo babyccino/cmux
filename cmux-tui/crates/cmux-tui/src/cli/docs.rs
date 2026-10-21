@@ -99,6 +99,7 @@ pub(super) const GUIDES: &[Guide] = &[
             "login",
             "signin",
             "harness",
+            "outdated",
             "peer",
             "enroll",
         ],
@@ -108,7 +109,10 @@ pub(super) const GUIDES: &[Guide] = &[
         commands that check it, the commands that do it, and what only the person can do. \
         `cmux setup status` checks the tasks setup runs. `cmux setup trust [FOLDER]` records \
         trust for a folder; it changes nothing when the folder is already trusted, --dry-run \
-        prints the plan, and every result names its undo command. Every `cmux setup` command \
+        prints the plan, and every result names its undo command. `cmux setup harness [ID ...]` \
+        reports whether each harness (default: every configured or found one) is installed, \
+        signed in and outdated; a missing CLI or sign-in is needs_user with the install docs or \
+        `cmux harness login ID`. Every `cmux setup` command \
         prints one JSON object: state is ok, changed, planned, needs_user or failed.",
     },
 ];
