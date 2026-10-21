@@ -21031,8 +21031,8 @@
       "title_table" : "ActionCatalog"
     },
     {
-      "cli" : "unimplemented",
-      "cli_name" : "action agent-chat-toggle-notification-mute",
+      "cli" : "offered",
+      "cli_name" : "tab toggle-chat-notifications",
       "context_menu" : "offered",
       "context_menus" : [
         "tab"
@@ -21044,7 +21044,7 @@
       "default_shortcut" : null,
       "id" : "agentChat.toggleNotificationMute",
       "main_menu" : null,
-      "mcp" : "unimplemented",
+      "mcp" : "offered",
       "palette" : "offered",
       "palette_section" : {
         "id" : "category.agents",
