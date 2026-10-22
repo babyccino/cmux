@@ -4621,6 +4621,18 @@ class TabManager: ObservableObject {
         }
         debugPrepareWorkspaceSwitch(directionLabel, from: currentId, to: destinationId)
 #endif
+        if TmpSwitchProbe.sidebarPreview {
+            NotificationCenter.default.post(
+                name: TmpSwitchProbe.keyboardSelectionPreview,
+                object: window,
+                userInfo: ["workspaceId": destinationId]
+            )
+        }
+        if TmpSwitchProbe.forceReveal, TmpSwitchProbe.forceBeforeSelect, let incoming = tabs.first(where: { $0.id == destinationId }) {
+            TmpSwitchProbe.forceSwap(to: incoming, in: tabs)
+            CATransaction.flush()
+            TmpSwitchProbe.log("preflushed")
+        }
         selectWorkspaceId(
             destinationId,
             notificationDismissalContext: .explicitWorkspaceResume
@@ -7633,6 +7645,9 @@ enum TmpSwitchProbe {
     static let noInteractiveSync = env["CMUX_TMP_NO_INTERACTIVE_SYNC"] == "1"
     static let equatablePages = env["CMUX_TMP_EQUATABLE"] == "1"
     static let lazyAppKitHost = env["CMUX_TMP_APPKIT_HOST_LAZY"] == "1"
+    static let sidebarPreview = env["CMUX_TMP_SIDEBAR_PREVIEW"] == "1"
+    static let forceBeforeSelect = env["CMUX_TMP_FORCE_BEFORE_SELECT"] == "1"
+    static let keyboardSelectionPreview = Notification.Name("cmux.tmp.keyboardSelectionPreview")
     static let hiddenOpacity: Double = env["CMUX_TMP_NEAR_ZERO_OPACITY"] == "1" ? 0.001 : 0
 
     /// `CMUX_TMP_AUTODRIVE=count,gapMs,delaySec` posts cmd-shift-] and

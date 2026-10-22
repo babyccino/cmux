@@ -1885,7 +1885,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .opacity(sidebarSelectionState.selection == .tabs ? 1 : 0)
+            .opacity(sidebarSelectionState.selection == .tabs ? 1 : TmpSwitchProbe.hiddenOpacity)
             .allowsHitTesting(sidebarSelectionState.selection == .tabs)
             .accessibilityHidden(sidebarSelectionState.selection != .tabs)
         }

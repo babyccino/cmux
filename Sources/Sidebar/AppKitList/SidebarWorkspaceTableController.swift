@@ -269,6 +269,22 @@ final class SidebarWorkspaceTableController: NSObject, NSTableViewDataSource, NS
             }
         }
 
+        tmpKeyboardPreviewObserver = NotificationCenter.default.addObserver(
+            forName: TmpSwitchProbe.keyboardSelectionPreview,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self,
+                      let workspaceId = notification.userInfo?["workspaceId"] as? UUID,
+                      let window = notification.object as? NSWindow,
+                      self.containerView?.window === window,
+                      let row = self.rows.firstIndex(where: { $0.workspaceId == workspaceId && !$0.isGroupHeader }) else { return }
+                self.previewSelection(row: row, modifiers: [], hitView: nil)
+                TmpSwitchProbe.log("sidebar.preview")
+            }
+        }
+
         resizeDidEndObserver = NotificationCenter.default.addObserver(
             forName: .cmuxInteractiveGeometryResizeDidEnd,
             object: nil,
@@ -2054,6 +2070,7 @@ final class SidebarWorkspaceTableController: NSObject, NSTableViewDataSource, NS
     /// preview) would otherwise keep its speculative paint forever — the
     /// apply cancels the bailout believing it reconciled.
     private var optimisticallyPaintedRowIds: Set<SidebarWorkspaceRenderItemID> = []
+    private var tmpKeyboardPreviewObserver: NSObjectProtocol?
 
     private func schedulePreviewBailout() {
         previewBailoutTask?.cancel()
