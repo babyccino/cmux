@@ -396,7 +396,7 @@ struct WorkspaceContentView: View {
             guard isVisible else { return }
             refreshGhosttyAppearanceConfig(
                 reason: "workspaceBecameVisible",
-                forceInitialApply: true
+                forceInitialApply: !TmpSwitchProbe.noThemeReveal
             )
         }
         .onChange(of: isWorkspaceInputActive) { _, _ in
@@ -525,6 +525,7 @@ struct WorkspaceContentView: View {
         _ controller: BonsplitController,
         isInputActive: Bool
     ) {
+        let isInputActive = TmpSwitchProbe.noInteractiveSync ? true : isInputActive
         guard controller.isInteractive != isInputActive else { return }
         controller.isInteractive = isInputActive
     }

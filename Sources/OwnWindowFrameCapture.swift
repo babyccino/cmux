@@ -1,5 +1,8 @@
 import CoreGraphics
 import Foundation
+import CoreMedia
+import CoreVideo
+import QuartzCore
 @preconcurrency import ScreenCaptureKit
 
 /// One captured frame of one of cmux's own windows.
@@ -239,5 +242,111 @@ private final class OwnWindowCaptureDeadlineWaiter<Value: Sendable>: @unchecked 
 
         cancellation?()
         continuation?.resume(with: result)
+    }
+}
+
+/// Streams the app's own main window and logs when its pixels change after a
+/// workspace switch, so switch latency can be read as time-to-pixels.
+final class TmpPhotonProbe: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    static let shared = TmpPhotonProbe()
+    private var stream: SCStream?
+    private let queue = DispatchQueue(label: "cmux.tmp.photon", qos: .userInteractive)
+    private var previous: [UInt32] = []
+    private let gridX = 96
+    private let gridY = 60
+    private var timebase: Double = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return Double(info.numer) / Double(info.denom) / 1_000_000_000
+    }()
+    private let handle: FileHandle? = {
+        let path = "/tmp/cmux-tmp-photon.log"
+        FileManager.default.createFile(atPath: path, contents: nil)
+        return FileHandle(forWritingAtPath: path)
+    }()
+
+    func write(_ line: String) {
+        queue.async { [handle] in
+            handle?.write(Data((line + "\n").utf8))
+        }
+    }
+
+    @MainActor func start(windowID: CGWindowID, sidebarFraction: Double) {
+        guard #available(macOS 14.4, *) else { return }
+        Task { @MainActor in
+            do {
+                let content = try await SCShareableContent.currentProcess
+                guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+                    write("photon fail window-missing")
+                    return
+                }
+                let filter = SCContentFilter(desktopIndependentWindow: window)
+                let configuration = SCStreamConfiguration()
+                configuration.width = max(64, Int(window.frame.width / 2))
+                configuration.height = max(64, Int(window.frame.height / 2))
+                configuration.minimumFrameInterval = CMTime(value: 1, timescale: 240)
+                configuration.queueDepth = 8
+                configuration.pixelFormat = kCVPixelFormatType_32BGRA
+                configuration.showsCursor = false
+                let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+                try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+                try await stream.startCapture()
+                self.stream = stream
+                self.sidebarFraction = sidebarFraction
+                write("photon started w=\(configuration.width) h=\(configuration.height) sidebar=\(sidebarFraction)")
+            } catch {
+                write("photon fail \(error)")
+            }
+        }
+    }
+
+    private var sidebarFraction: Double = 0.15
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        write("photon stopped \(error)")
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen,
+              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let info = attachments.first,
+              let statusRaw = info[.status] as? Int,
+              SCFrameStatus(rawValue: statusRaw) == .complete,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let displayTime = (info[.displayTime] as? UInt64).map { Double($0) * timebase } ?? CACurrentMediaTime()
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        var samples = [UInt32](repeating: 0, count: gridX * gridY)
+        for gy in 0..<gridY {
+            let y = min(height - 1, (gy * height + height / 2) / gridY)
+            let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt32.self)
+            for gx in 0..<gridX {
+                let x = min(width - 1, (gx * width + width / 2) / gridX)
+                samples[gy * gridX + gx] = row[x]
+            }
+        }
+        defer { previous = samples }
+        guard previous.count == samples.count else { return }
+        let sidebarColumns = Int(Double(gridX) * sidebarFraction)
+        var sideChanged = 0
+        var mainChanged = 0
+        for index in 0..<samples.count where samples[index] != previous[index] {
+            if index % gridX < sidebarColumns { sideChanged += 1 } else { mainChanged += 1 }
+        }
+        let sideTotal = max(1, sidebarColumns * gridY)
+        let mainTotal = max(1, (gridX - sidebarColumns) * gridY)
+        let start = TmpSwitchProbe.start
+        let seq = TmpSwitchProbe.seq
+        write(String(
+            format: "photon seq=%d dt=%.1f side=%.3f main=%.3f",
+            seq,
+            (displayTime - start) * 1000,
+            Double(sideChanged) / Double(sideTotal),
+            Double(mainChanged) / Double(mainTotal)
+        ))
     }
 }

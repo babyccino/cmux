@@ -1694,6 +1694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // notification, so nothing else would bring it up (#10866).
         BrowserAvailabilityMonitor.shared.activate()
         startChiefIfEnabled()
+        TmpSwitchProbe.startAutodriveIfRequested()
         // Composition root for surfaces: this Mac's panes and every cloud machine's
         // cmux-tui session feed one catalog, and the sidebar, drag/drop, socket and CLI all
         // open through `SurfaceCatalog.project`.

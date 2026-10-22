@@ -1865,9 +1865,20 @@ struct ContentView: View {
                     )
                     if Self.tmpAppKitWorkspaceHost {
                         TmpWorkspaceAppKitHost(isHidden: !isSelectedWorkspace, content: content)
+                    } else if TmpSwitchProbe.equatablePages {
+                        TmpMountedWorkspacePage(
+                            content: content,
+                            workspaceIdentity: ObjectIdentifier(tab),
+                            isSelected: isSelectedWorkspace,
+                            isPresented: isPresentedWorkspace,
+                            rightSidebarOwnsInputFocus: fileExplorerState.rightSidebarOwnsInputFocus,
+                            isFullScreen: isFullScreen
+                        )
+                        .equatable()
+                        .zIndex(isSelectedWorkspace ? 2 : 0)
                     } else {
                         content
-                            .opacity(isSelectedWorkspace ? 1 : 0)
+                            .opacity(isSelectedWorkspace ? 1 : TmpSwitchProbe.hiddenOpacity)
                             .allowsHitTesting(isSelectedWorkspace)
                             .accessibilityHidden(!isSelectedWorkspace)
                             .zIndex(isSelectedWorkspace ? 2 : 0)
@@ -18588,10 +18599,42 @@ struct TmpWorkspaceAppKitHost<Content: View>: NSViewRepresentable {
     }
 
     func updateNSView(_ container: Container, context: Context) {
-        if container.isHidden != isHidden {
+        let hiddenChanged = container.isHidden != isHidden
+        if hiddenChanged {
             TmpSwitchProbe.log("appkitHost.isHidden=\(isHidden ? 1 : 0)")
+        }
+        if hiddenChanged || !TmpSwitchProbe.lazyAppKitHost {
+            container.hostingView?.rootView = rootView(context)
+        }
+        if hiddenChanged {
             container.isHidden = isHidden
         }
-        container.hostingView?.rootView = rootView(context)
+    }
+}
+
+
+/// Skips re-evaluating mounted workspaces whose inputs did not change, so a
+/// switch only updates the outgoing and incoming pages.
+struct TmpMountedWorkspacePage: View, Equatable {
+    let content: WorkspaceContentView
+    let workspaceIdentity: ObjectIdentifier
+    let isSelected: Bool
+    let isPresented: Bool
+    let rightSidebarOwnsInputFocus: Bool
+    let isFullScreen: Bool
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.workspaceIdentity == rhs.workspaceIdentity
+            && lhs.isSelected == rhs.isSelected
+            && lhs.isPresented == rhs.isPresented
+            && lhs.rightSidebarOwnsInputFocus == rhs.rightSidebarOwnsInputFocus
+            && lhs.isFullScreen == rhs.isFullScreen
+    }
+
+    var body: some View {
+        content
+            .opacity(isSelected ? 1 : TmpSwitchProbe.hiddenOpacity)
+            .allowsHitTesting(isSelected)
+            .accessibilityHidden(!isSelected)
     }
 }

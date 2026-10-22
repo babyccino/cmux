@@ -4612,6 +4612,7 @@ class TabManager: ObservableObject {
             return
         }
         TmpSwitchProbe.start = CACurrentMediaTime()
+        TmpSwitchProbe.seq += 1
         TmpSwitchProbe.log("cycle eventAge=\(NSApp.currentEvent.map { String(format: "%.1f", (ProcessInfo.processInfo.systemUptime - $0.timestamp) * 1000) } ?? "nil")ms")
 #if DEBUG
         let directionLabel = switch direction {
@@ -4626,6 +4627,10 @@ class TabManager: ObservableObject {
         )
         if TmpSwitchProbe.forceReveal, let incoming = tabs.first(where: { $0.id == destinationId }) {
             TmpSwitchProbe.forceSwap(to: incoming, in: tabs)
+            if TmpSwitchProbe.flushAfterSwap {
+                CATransaction.flush()
+                TmpSwitchProbe.log("flushed")
+            }
         }
         // Keyboard nav is an explicit "focus one workspace" gesture, so drop
         // any stale sidebar multi-selection (Shift-click range) so subsequent
@@ -7620,6 +7625,73 @@ enum CloseDontAskAgainCheckbox {
 
 enum TmpSwitchProbe {
     static var start: CFTimeInterval = 0
+    static var seq = 0
+    static let env = ProcessInfo.processInfo.environment
+    static let flushAfterSwap = env["CMUX_TMP_FLUSH"] == "1"
+    static let noThemeReveal = env["CMUX_TMP_NO_THEME_REVEAL"] == "1"
+    static let noRevealRefresh = env["CMUX_TMP_NO_REVEAL_REFRESH"] == "1"
+    static let noInteractiveSync = env["CMUX_TMP_NO_INTERACTIVE_SYNC"] == "1"
+    static let equatablePages = env["CMUX_TMP_EQUATABLE"] == "1"
+    static let lazyAppKitHost = env["CMUX_TMP_APPKIT_HOST_LAZY"] == "1"
+    static let hiddenOpacity: Double = env["CMUX_TMP_NEAR_ZERO_OPACITY"] == "1" ? 0.001 : 0
+
+    /// `CMUX_TMP_AUTODRIVE=count,gapMs,delaySec` posts cmd-shift-] and
+    /// cmd-shift-[ key events into the app's own event queue: `count` switches
+    /// forward, the same back, repeated until `count * 4` switches have run.
+    @MainActor static func startAutodriveIfRequested() {
+        guard let spec = env["CMUX_TMP_AUTODRIVE"] else { return }
+        let parts = spec.split(separator: ",").compactMap { Double($0) }
+        let span = Int(parts.first ?? 6)
+        let gap = (parts.count > 1 ? parts[1] : 700) / 1000
+        let delay = parts.count > 2 ? parts[2] : 8
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            NSApp.activate(ignoringOtherApps: true)
+            guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeKey && $0.contentView != nil }) else {
+                TmpPhotonProbe.shared.write("autodrive fail no-window")
+                return
+            }
+            window.makeKeyAndOrderFront(nil)
+            if env["CMUX_TMP_PHOTON"] == "1" {
+                let sidebarWidth = 260.0
+                TmpPhotonProbe.shared.start(
+                    windowID: CGWindowID(window.windowNumber),
+                    sidebarFraction: min(0.5, sidebarWidth / max(1, window.frame.width))
+                )
+            }
+            var steps: [Bool] = []
+            while steps.count < span * 4 {
+                steps += Array(repeating: true, count: span) + Array(repeating: false, count: span)
+            }
+            @MainActor func post(_ index: Int) {
+                guard index < steps.count else {
+                    TmpPhotonProbe.shared.write("autodrive done")
+                    return
+                }
+                let forward = steps[index]
+                let character = forward ? "}" : "{"
+                let keyCode: UInt16 = forward ? 30 : 33
+                TmpPhotonProbe.shared.write("autodrive key seq=\(seq + 1) active=\(NSApp.isActive ? 1 : 0) key=\(NSApp.keyWindow === window ? 1 : 0)")
+                for type in [NSEvent.EventType.keyDown, .keyUp] {
+                    if let event = NSEvent.keyEvent(
+                        with: type,
+                        location: .zero,
+                        modifierFlags: [.command, .shift],
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: window.windowNumber,
+                        context: nil,
+                        characters: character,
+                        charactersIgnoringModifiers: character,
+                        isARepeat: false,
+                        keyCode: keyCode
+                    ) {
+                        NSApp.postEvent(event, atStart: false)
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + gap) { MainActor.assumeIsolated { post(index + 1) } }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { MainActor.assumeIsolated { post(0) } }
+        }
+    }
     static let forceReveal = ProcessInfo.processInfo.environment["CMUX_TMP_FORCE_REVEAL"] == "1"
     static var forcedVisibleWorkspaceID: UUID?
     static var forcedVisibleUntil: CFTimeInterval = 0
@@ -7639,6 +7711,6 @@ enum TmpSwitchProbe {
     }
     @MainActor static func log(_ message: String) {
         let dt = (CACurrentMediaTime() - start) * 1000
-        GhosttyApp.shared.logBackground("TMPSW \(message) dt=\(String(format: "%.1f", dt))ms")
+        GhosttyApp.shared.logBackground("TMPSW seq=\(seq) \(message) dt=\(String(format: "%.1f", dt))ms")
     }
 }
