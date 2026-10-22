@@ -4624,6 +4624,9 @@ class TabManager: ObservableObject {
             destinationId,
             notificationDismissalContext: .explicitWorkspaceResume
         )
+        if TmpSwitchProbe.forceReveal, let incoming = tabs.first(where: { $0.id == destinationId }) {
+            TmpSwitchProbe.forceSwap(to: incoming, in: tabs)
+        }
         // Keyboard nav is an explicit "focus one workspace" gesture, so drop
         // any stale sidebar multi-selection (Shift-click range) so subsequent
         // batch actions don't operate on workspaces the user thought they
@@ -7617,6 +7620,23 @@ enum CloseDontAskAgainCheckbox {
 
 enum TmpSwitchProbe {
     static var start: CFTimeInterval = 0
+    static let forceReveal = ProcessInfo.processInfo.environment["CMUX_TMP_FORCE_REVEAL"] == "1"
+    static var forcedVisibleWorkspaceID: UUID?
+    static var forcedVisibleUntil: CFTimeInterval = 0
+    @MainActor static func forceSwap(to incoming: Workspace, in workspaces: [Workspace]) {
+        forcedVisibleWorkspaceID = incoming.id
+        forcedVisibleUntil = CACurrentMediaTime() + 0.3
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for workspace in workspaces where workspace.id != incoming.id {
+            workspace.tmpForceTerminalPresentation(visible: false)
+        }
+        incoming.tmpForceTerminalPresentation(visible: true)
+        CATransaction.commit()
+    }
+    static func isForcedVisible(_ workspaceID: UUID) -> Bool {
+        forcedVisibleWorkspaceID == workspaceID && CACurrentMediaTime() < forcedVisibleUntil
+    }
     @MainActor static func log(_ message: String) {
         let dt = (CACurrentMediaTime() - start) * 1000
         GhosttyApp.shared.logBackground("TMPSW \(message) dt=\(String(format: "%.1f", dt))ms")

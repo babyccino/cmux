@@ -1845,7 +1845,7 @@ struct ContentView: View {
                     let isPresentedWorkspace = isSelectedWorkspace && isShowingWorkspaces
                     // Never retain a live source workspace as a loading cover:
                     // that makes mount ownership depend on a later frame signal.
-                    WorkspaceContentView(
+                    let content = WorkspaceContentView(
                         workspace: tab,
                         isWorkspaceVisible: isPresentedWorkspace,
                         isWorkspaceInputActive: isPresentedWorkspace,
@@ -1863,10 +1863,15 @@ struct ContentView: View {
                             )
                         }
                     )
-                    .opacity(isSelectedWorkspace ? 1 : 0)
-                    .allowsHitTesting(isSelectedWorkspace)
-                    .accessibilityHidden(!isSelectedWorkspace)
-                    .zIndex(isSelectedWorkspace ? 2 : 0)
+                    if Self.tmpAppKitWorkspaceHost {
+                        TmpWorkspaceAppKitHost(isHidden: !isSelectedWorkspace, content: content)
+                    } else {
+                        content
+                            .opacity(isSelectedWorkspace ? 1 : 0)
+                            .allowsHitTesting(isSelectedWorkspace)
+                            .accessibilityHidden(!isSelectedWorkspace)
+                            .zIndex(isSelectedWorkspace ? 2 : 0)
+                    }
                 }
             }
             .opacity(sidebarSelectionState.selection == .tabs ? 1 : 0)
@@ -2782,6 +2787,9 @@ struct ContentView: View {
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
                 CATransaction.setCompletionBlock { TmpSwitchProbe.log("syncReveal.commitDone") }
+                if TmpSwitchProbe.forceReveal {
+                    TmpSwitchProbe.forceSwap(to: incoming, in: tabManager.tabs)
+                }
                 incoming.reconcileTerminalPortalVisibilityForCurrentRenderedLayout()
                 TerminalWindowPortalRegistry.tmpSynchronizeNow(for: window)
                 TmpSwitchProbe.log("syncReveal.done")
@@ -18546,4 +18554,44 @@ enum SidebarSelection {
     case notifications
     /// Chief Home fills the content area; workspaces stay mounted but hidden and input-inactive.
     case home
+}
+
+extension ContentView {
+    static let tmpAppKitWorkspaceHost = ProcessInfo.processInfo.environment["CMUX_TMP_APPKIT_HOST"] == "1"
+}
+
+/// Hosts one workspace in its own NSHostingView and hides it with NSView.isHidden,
+/// so switching never removes or re-adds the workspace's AppKit views.
+struct TmpWorkspaceAppKitHost<Content: View>: NSViewRepresentable {
+    let isHidden: Bool
+    let content: Content
+
+    final class Container: NSView {
+        var hostingView: NSHostingView<AnyView>?
+        override var isFlipped: Bool { true }
+    }
+
+    private func rootView(_ context: Context) -> AnyView {
+        AnyView(content.environment(\.self, context.environment))
+    }
+
+    func makeNSView(context: Context) -> Container {
+        let container = Container()
+        let hostingView = NSHostingView(rootView: rootView(context))
+        hostingView.sizingOptions = []
+        hostingView.autoresizingMask = [.width, .height]
+        hostingView.frame = container.bounds
+        container.addSubview(hostingView)
+        container.hostingView = hostingView
+        container.isHidden = isHidden
+        return container
+    }
+
+    func updateNSView(_ container: Container, context: Context) {
+        if container.isHidden != isHidden {
+            TmpSwitchProbe.log("appkitHost.isHidden=\(isHidden ? 1 : 0)")
+            container.isHidden = isHidden
+        }
+        container.hostingView?.rootView = rootView(context)
+    }
 }

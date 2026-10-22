@@ -13225,6 +13225,26 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         bonsplitController.allPaneIds.count > 1 || panels.count > 1
     }
 
+    /// Shows or hides this workspace's attached terminal views directly, without
+    /// waiting for SwiftUI to rebind their portal entries.
+    func tmpForceTerminalPresentation(visible: Bool) {
+        let visiblePanelIds = visible ? renderedVisiblePanelIdsForCurrentLayout() : []
+        for panel in panels.values {
+            guard let terminalPanel = panel as? TerminalPanel else { continue }
+            let hostedView = terminalPanel.hostedView
+            let shouldShow = visiblePanelIds.contains(terminalPanel.id)
+            guard hostedView.isHidden == shouldShow else { continue }
+            if shouldShow {
+                guard hostedView.window != nil, hostedView.frame.width > 1, hostedView.frame.height > 1 else {
+                    TmpSwitchProbe.log("force.show.skipped window=\(hostedView.window != nil ? 1 : 0) frame=\(hostedView.frame.size)")
+                    continue
+                }
+            }
+            hostedView.isHidden = !shouldShow
+            TmpSwitchProbe.log("force.\(shouldShow ? "show" : "hide")")
+        }
+    }
+
     @discardableResult
     func reconcileTerminalPortalVisibilityForCurrentRenderedLayout() -> Bool {
         let visiblePanelIds = renderedVisiblePanelIdsForCurrentLayout()

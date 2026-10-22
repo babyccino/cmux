@@ -1854,6 +1854,14 @@ final class WindowTerminalPortal: NSObject {
 #endif
     }
 
+    private func tmpPortalHide(_ hostedView: NSView, workspaceID: UUID?, site: String) {
+        if let workspaceID, TmpSwitchProbe.isForcedVisible(workspaceID) {
+            TmpSwitchProbe.log("portal.hide.skipped site=\(site)")
+            return
+        }
+        hostedView.isHidden = true
+    }
+
     func hideEntries(forWorkspaceID workspaceID: UUID) {
         for hostedId in entriesByHostedId.compactMap({ hostedId, entry in
             entry.workspaceID == workspaceID ? hostedId : nil
@@ -2341,7 +2349,7 @@ final class WindowTerminalPortal: NSObject {
                 cmuxDebugLog("portal.hidden hosted=\(portalDebugToken(hostedView)) value=1 reason=missingAnchorOrWindow")
             }
 #endif
-            hostedView.isHidden = true
+            tmpPortalHide(hostedView, workspaceID: entry.workspaceID, site: "L2344")
             if entry.visibleInUI {
                 _ = scheduleTransientRecoveryRetryIfNeeded(
                     forHostedId: hostedId,
@@ -2381,7 +2389,7 @@ final class WindowTerminalPortal: NSObject {
             } else {
                 resetTransientRecoveryRetryIfNeeded(forHostedId: hostedId, entry: &entry)
             }
-            hostedView.isHidden = true
+            tmpPortalHide(hostedView, workspaceID: entry.workspaceID, site: "L2384")
             if entry.visibleInUI {
                 _ = scheduleTransientRecoveryRetryIfNeeded(
                     forHostedId: hostedId,
@@ -2440,7 +2448,7 @@ final class WindowTerminalPortal: NSObject {
             } else {
                 resetTransientRecoveryRetryIfNeeded(forHostedId: hostedId, entry: &entry)
             }
-            hostedView.isHidden = true
+            tmpPortalHide(hostedView, workspaceID: entry.workspaceID, site: "L2443")
             if entry.visibleInUI {
                 if Self.transientRecoveryEnabled {
                     _ = scheduleTransientRecoveryRetryIfNeeded(
@@ -2558,7 +2566,7 @@ final class WindowTerminalPortal: NSObject {
                 "host=\(portalDebugFrame(hostBounds))"
             )
 #endif
-            hostedView.isHidden = true
+            tmpPortalHide(hostedView, workspaceID: entry.workspaceID, site: "L2561")
         }
         if shouldPreserveVisibleOnTransientGeometry {
 #if DEBUG
