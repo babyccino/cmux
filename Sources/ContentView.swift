@@ -18574,7 +18574,31 @@ extension ContentView {
 /// Hosts one workspace in its own NSHostingView and hides it with NSView.isHidden,
 /// so switching never removes or re-adds the workspace's AppKit views.
 @MainActor enum TmpWorkspaceAppKitHostRegistry {
-    static let containers = NSMapTable<NSUUID, NSView>.strongToWeakObjects()
+    static let containers = NSMapTable<NSUUID, TmpPageContainer>.strongToWeakObjects()
+}
+
+/// Hosts one workspace page. With `CMUX_TMP_PAGE_ALPHA=1` a hidden page stays
+/// in the AppKit tree at alpha 0, so showing it is a compositor change.
+final class TmpPageContainer: NSView {
+    var hostingView: NSHostingView<AnyView>?
+    var tmpRenderedHidden: Bool?
+    override var isFlipped: Bool { true }
+
+    var pageHidden: Bool {
+        get { TmpSwitchProbe.pageAlpha ? alphaValue < 0.5 : isHidden }
+        set {
+            if TmpSwitchProbe.pageAlpha {
+                alphaValue = newValue ? 0 : 1
+            } else {
+                isHidden = newValue
+            }
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if TmpSwitchProbe.pageAlpha, alphaValue < 0.5 { return nil }
+        return super.hitTest(point)
+    }
 }
 
 struct TmpWorkspaceAppKitHost<Content: View>: NSViewRepresentable {
@@ -18582,11 +18606,7 @@ struct TmpWorkspaceAppKitHost<Content: View>: NSViewRepresentable {
     let isHidden: Bool
     let content: Content
 
-    final class Container: NSView {
-        var hostingView: NSHostingView<AnyView>?
-        var tmpRenderedHidden: Bool?
-        override var isFlipped: Bool { true }
-    }
+    typealias Container = TmpPageContainer
 
     private func rootView(_ context: Context) -> AnyView {
         AnyView(content.environment(\.self, context.environment))
@@ -18600,14 +18620,14 @@ struct TmpWorkspaceAppKitHost<Content: View>: NSViewRepresentable {
         hostingView.frame = container.bounds
         container.addSubview(hostingView)
         container.hostingView = hostingView
-        container.isHidden = isHidden
+        container.pageHidden = isHidden
         TmpWorkspaceAppKitHostRegistry.containers.setObject(container, forKey: workspaceId as NSUUID)
         return container
     }
 
     func updateNSView(_ container: Container, context: Context) {
         TmpWorkspaceAppKitHostRegistry.containers.setObject(container, forKey: workspaceId as NSUUID)
-        let hiddenChanged = container.isHidden != isHidden || container.tmpRenderedHidden != isHidden
+        let hiddenChanged = container.pageHidden != isHidden || container.tmpRenderedHidden != isHidden
         container.tmpRenderedHidden = isHidden
         if hiddenChanged {
             TmpSwitchProbe.log("appkitHost.isHidden=\(isHidden ? 1 : 0)")
@@ -18616,7 +18636,7 @@ struct TmpWorkspaceAppKitHost<Content: View>: NSViewRepresentable {
             container.hostingView?.rootView = rootView(context)
         }
         if hiddenChanged {
-            container.isHidden = isHidden
+            container.pageHidden = isHidden
         }
     }
 }

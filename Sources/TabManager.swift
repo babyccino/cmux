@@ -4621,6 +4621,10 @@ class TabManager: ObservableObject {
         }
         debugPrepareWorkspaceSwitch(directionLabel, from: currentId, to: destinationId)
 #endif
+        if TmpSwitchProbe.batchPreviewCommit {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+        }
         if TmpSwitchProbe.sidebarPreview {
             NotificationCenter.default.post(
                 name: TmpSwitchProbe.keyboardSelectionPreview,
@@ -4630,8 +4634,13 @@ class TabManager: ObservableObject {
         }
         if TmpSwitchProbe.forceReveal, TmpSwitchProbe.forceBeforeSelect, let incoming = tabs.first(where: { $0.id == destinationId }) {
             TmpSwitchProbe.forceSwap(to: incoming, in: tabs)
+            if TmpSwitchProbe.batchPreviewCommit {
+                CATransaction.commit()
+            }
             CATransaction.flush()
             TmpSwitchProbe.log("preflushed")
+        } else if TmpSwitchProbe.batchPreviewCommit {
+            CATransaction.commit()
         }
         selectWorkspaceId(
             destinationId,
@@ -7645,6 +7654,8 @@ enum TmpSwitchProbe {
     static let noInteractiveSync = env["CMUX_TMP_NO_INTERACTIVE_SYNC"] == "1"
     static let equatablePages = env["CMUX_TMP_EQUATABLE"] == "1"
     static let lazyAppKitHost = env["CMUX_TMP_APPKIT_HOST_LAZY"] == "1"
+    static let pageAlpha = env["CMUX_TMP_PAGE_ALPHA"] == "1"
+    static let batchPreviewCommit = env["CMUX_TMP_BATCH_COMMIT"] == "1"
     static let sidebarPreview = env["CMUX_TMP_SIDEBAR_PREVIEW"] == "1"
     static let forceBeforeSelect = env["CMUX_TMP_FORCE_BEFORE_SELECT"] == "1"
     static let keyboardSelectionPreview = Notification.Name("cmux.tmp.keyboardSelectionPreview")
@@ -7740,8 +7751,8 @@ enum TmpSwitchProbe {
         for workspace in workspaces {
             guard let container = TmpWorkspaceAppKitHostRegistry.containers.object(forKey: workspace.id as NSUUID) else { continue }
             let hidden = workspace.id != incoming.id
-            if container.isHidden != hidden {
-                container.isHidden = hidden
+            if container.pageHidden != hidden {
+                container.pageHidden = hidden
                 log("force.page.\(hidden ? "hide" : "show")")
             }
         }
