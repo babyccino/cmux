@@ -7653,7 +7653,25 @@ enum TmpSwitchProbe {
     /// `CMUX_TMP_AUTODRIVE=count,gapMs,delaySec` posts cmd-shift-] and
     /// cmd-shift-[ key events into the app's own event queue: `count` switches
     /// forward, the same back, repeated until `count * 4` switches have run.
+    @MainActor static func installAddSubviewProbeIfRequested() {
+        guard env["CMUX_TMP_ADDSUB_PROBE"] == "1" else { return }
+        let selector = #selector(NSView.addSubview(_:positioned:relativeTo:))
+        guard let method = class_getInstanceMethod(NSView.self, selector) else { return }
+        typealias Original = @convention(c) (NSView, Selector, NSView, NSWindow.OrderingMode, NSView?) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: Original.self)
+        let block: @convention(block) (NSView, NSView, NSWindow.OrderingMode, NSView?) -> Void = { receiver, view, mode, relative in
+            if CACurrentMediaTime() - start < 0.3, view.superview !== receiver {
+                let hosted = view.subviews.first.map { String(describing: type(of: $0)) } ?? "-"
+                let inner = view.subviews.first?.subviews.first.map { String(describing: type(of: $0)) } ?? "-"
+                GhosttyApp.shared.logBackground("TMPSW seq=\(seq) addsub parent=\(type(of: receiver)) view=\(type(of: view)) hosted=\(hosted) inner=\(inner) dt=\(String(format: "%.1f", (CACurrentMediaTime() - start) * 1000))ms")
+            }
+            original(receiver, selector, view, mode, relative)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(block))
+    }
+
     @MainActor static func startAutodriveIfRequested() {
+        installAddSubviewProbeIfRequested()
         guard let spec = env["CMUX_TMP_AUTODRIVE"] else { return }
         let parts = spec.split(separator: ",").compactMap { Double($0) }
         let span = Int(parts.first ?? 6)
@@ -7719,6 +7737,14 @@ enum TmpSwitchProbe {
             workspace.tmpForceTerminalPresentation(visible: false)
         }
         incoming.tmpForceTerminalPresentation(visible: true)
+        for workspace in workspaces {
+            guard let container = TmpWorkspaceAppKitHostRegistry.containers.object(forKey: workspace.id as NSUUID) else { continue }
+            let hidden = workspace.id != incoming.id
+            if container.isHidden != hidden {
+                container.isHidden = hidden
+                log("force.page.\(hidden ? "hide" : "show")")
+            }
+        }
         CATransaction.commit()
     }
     static func isForcedVisible(_ workspaceID: UUID) -> Bool {

@@ -1864,7 +1864,7 @@ struct ContentView: View {
                         }
                     )
                     if Self.tmpAppKitWorkspaceHost {
-                        TmpWorkspaceAppKitHost(isHidden: !isSelectedWorkspace, content: content)
+                        TmpWorkspaceAppKitHost(workspaceId: tab.id, isHidden: !isSelectedWorkspace, content: content)
                     } else if TmpSwitchProbe.equatablePages {
                         TmpMountedWorkspacePage(
                             content: content,
@@ -18573,12 +18573,18 @@ extension ContentView {
 
 /// Hosts one workspace in its own NSHostingView and hides it with NSView.isHidden,
 /// so switching never removes or re-adds the workspace's AppKit views.
+@MainActor enum TmpWorkspaceAppKitHostRegistry {
+    static let containers = NSMapTable<NSUUID, NSView>.strongToWeakObjects()
+}
+
 struct TmpWorkspaceAppKitHost<Content: View>: NSViewRepresentable {
+    let workspaceId: UUID
     let isHidden: Bool
     let content: Content
 
     final class Container: NSView {
         var hostingView: NSHostingView<AnyView>?
+        var tmpRenderedHidden: Bool?
         override var isFlipped: Bool { true }
     }
 
@@ -18595,11 +18601,14 @@ struct TmpWorkspaceAppKitHost<Content: View>: NSViewRepresentable {
         container.addSubview(hostingView)
         container.hostingView = hostingView
         container.isHidden = isHidden
+        TmpWorkspaceAppKitHostRegistry.containers.setObject(container, forKey: workspaceId as NSUUID)
         return container
     }
 
     func updateNSView(_ container: Container, context: Context) {
-        let hiddenChanged = container.isHidden != isHidden
+        TmpWorkspaceAppKitHostRegistry.containers.setObject(container, forKey: workspaceId as NSUUID)
+        let hiddenChanged = container.isHidden != isHidden || container.tmpRenderedHidden != isHidden
+        container.tmpRenderedHidden = isHidden
         if hiddenChanged {
             TmpSwitchProbe.log("appkitHost.isHidden=\(isHidden ? 1 : 0)")
         }
