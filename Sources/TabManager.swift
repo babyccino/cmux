@@ -320,7 +320,9 @@ class TabManager: ObservableObject {
         } else {
             workspaceSwitchCoordinator.cancel()
         }
-        objectWillChange.send()
+        if !TmpSwitchProbe.noSelectionObjectWillChange {
+            objectWillChange.send()
+        }
         selectedTabIdPublisher.send(newValue)
 #if DEBUG
             guard newValue != selectedTabId else {
@@ -7656,6 +7658,7 @@ enum TmpSwitchProbe {
     static let lazyAppKitHost = env["CMUX_TMP_APPKIT_HOST_LAZY"] == "1"
     static let pageAlpha = env["CMUX_TMP_PAGE_ALPHA"] == "1"
     static let batchPreviewCommit = env["CMUX_TMP_BATCH_COMMIT"] == "1"
+    static let noSelectionObjectWillChange = env["CMUX_TMP_NO_SELECTION_OWC"] == "1"
     static let sidebarPreview = env["CMUX_TMP_SIDEBAR_PREVIEW"] == "1"
     static let forceBeforeSelect = env["CMUX_TMP_FORCE_BEFORE_SELECT"] == "1"
     static let keyboardSelectionPreview = Notification.Name("cmux.tmp.keyboardSelectionPreview")
