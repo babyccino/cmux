@@ -1,0 +1,13 @@
+photon started w=1202 h=698 sidebar=0.10815307820299501
+autodrive done
+first pixel change    n= 23 p50= 109.0 p90= 138.3 max= 214.3
+terminal swap (>20%)  n= 19 p50= 109.0 p90= 214.3 max= 228.6
+sidebar first change  n= 23 p50= 140.5 p90= 214.3 max= 228.6
+last terminal change  n= 23 p50= 109.0 p90= 215.4 max= 364.2
+last change (settled) n= 23 p50= 152.7 p90= 215.4 max= 364.2
+frames per switch     n= 23 p50=   2.0 p90=   3.0 max=   7.0
+no-change switches    0
+eventAge              n= 23 p50=   8.3 p90=  13.4 max=  16.6
+onChange              n= 23 p50=  17.3 p90=  23.3 max=  23.9
+flushed               n= 23 p50=  86.5 p90= 121.0 max= 202.0
+syncReveal.commitDone n= 23 p50= 118.3 p90= 171.3 max= 237.4
