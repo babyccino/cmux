@@ -334,19 +334,23 @@ final class TmpPhotonProbe: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         let sidebarColumns = Int(Double(gridX) * sidebarFraction)
         var sideChanged = 0
         var mainChanged = 0
+        var minX = gridX, minY = gridY, maxX = -1, maxY = -1
         for index in 0..<samples.count where samples[index] != previous[index] {
             if index % gridX < sidebarColumns { sideChanged += 1 } else { mainChanged += 1 }
+            let x = index % gridX, y = index / gridX
+            minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
         }
         let sideTotal = max(1, sidebarColumns * gridY)
         let mainTotal = max(1, (gridX - sidebarColumns) * gridY)
         let start = TmpSwitchProbe.start
         let seq = TmpSwitchProbe.seq
         write(String(
-            format: "photon seq=%d dt=%.1f side=%.3f main=%.3f",
+            format: "photon seq=%d dt=%.1f side=%.3f main=%.3f box=%d,%d-%d,%d",
             seq,
             (displayTime - start) * 1000,
             Double(sideChanged) / Double(sideTotal),
-            Double(mainChanged) / Double(mainTotal)
+            Double(mainChanged) / Double(mainTotal),
+            minX, minY, maxX, maxY
         ))
     }
 }
